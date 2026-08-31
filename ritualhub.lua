@@ -1,12 +1,9 @@
 -- ============================================================
---   RITUAL HUB - NEON GLASS EDITION (v3.0)
---   Blox Fruits | All Grinding Features (No PvP)
---   Sea-aware Teleports | Anti-Cheat Tweens | English
+--   RITUAL HUB - GOLD & BLACK (v6.0 FINAL)
+--   Redz Hub / Quantum Onyx inspired | Side Tabs
+--   All Grinding Features | No PvP | Accurate Sea Detection
 -- ============================================================
 
--- ============================================================
---                     INITIALIZATION
--- ============================================================
 local player = game:GetService("Players").LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
@@ -14,7 +11,6 @@ local rootPart = character:WaitForChild("HumanoidRootPart")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local CoreGui = game:GetService("CoreGui")
-local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 
 -- ============================================================
@@ -84,13 +80,29 @@ function attackTarget(target)
 end
 
 -- ============================================================
---                  SEA DETECTION
+--              ROBUST SEA DETECTION
 -- ============================================================
 function getSea()
-    local p = rootPart.Position
-    if p.X < 1000 and p.Z < 3000 then return "1st" end
-    if p.X > 2000 and p.Z < 2000 then return "2nd" end
-    if p.X > 3000 and p.Z > 1000 then return "3rd" end
+    if not rootPart then return "?" end
+    local pos = rootPart.Position
+    -- Fallback using known sea coordinate ranges
+    if pos.Z > 2000 then return "1st" end
+    if pos.X < 2000 and pos.Z < 0 then return "2nd" end
+    if pos.X > 2000 and pos.Z < 0 then return "3rd" end
+    -- Try to detect via workspace.Map parts
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        for _, child in pairs(map:GetChildren()) do
+            if child:IsA("BasePart") and child.Name:lower():find("sea") then
+                local seaPos = child.Position
+                if (pos - seaPos).magnitude < 3000 then
+                    if child.Name:lower():find("first") then return "1st" end
+                    if child.Name:lower():find("second") then return "2nd" end
+                    if child.Name:lower():find("third") then return "3rd" end
+                end
+            end
+        end
+    end
     return "?"
 end
 
@@ -119,124 +131,117 @@ local islands = {
 }
 
 -- ============================================================
---              NEON GLASS UI - HORIZONTAL
+--              UI - GOLD & BLACK (Side Tabs)
 -- ============================================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "RitualHub"
 screenGui.Parent = CoreGui
 screenGui.ResetOnSpawn = false
 
--- Background Blur (for glass effect)
 local blur = Instance.new("BlurEffect")
 blur.Size = 0
 blur.Parent = Lighting
 
--- Main Frame
+-- Main frame - slightly taller
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 780, 0, 120)
-mainFrame.Position = UDim2.new(0.5, -390, 0, 5)
-mainFrame.BackgroundColor3 = Color3.fromRGB(10, 8, 25)
-mainFrame.BackgroundTransparency = 0.2
-mainFrame.BorderSizePixel = 0
+mainFrame.Size = UDim2.new(0, 550, 0, 480)  -- More vertical
+mainFrame.Position = UDim2.new(0.5, -275, 0.5, -240)
+mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+mainFrame.BackgroundTransparency = 0.15
+mainFrame.BorderSizePixel = 2
+mainFrame.BorderColor3 = Color3.fromRGB(255, 215, 0) -- Gold
 mainFrame.ClipsDescendants = true
 mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = screenGui
 
--- Glowing Border (animated gradient)
-local border = Instance.new("Frame")
-border.Size = UDim2.new(1, 0, 1, 0)
-border.BackgroundTransparency = 1
-border.BorderSizePixel = 0
-border.Parent = mainFrame
-
-local borderGrad = Instance.new("UIGradient")
-borderGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 80, 255)),
-    ColorSequenceKeypoint.new(0.3, Color3.fromRGB(80, 180, 255)),
-    ColorSequenceKeypoint.new(0.7, Color3.fromRGB(255, 180, 80)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 255))
-})
-borderGrad.Rotation = 0
-borderGrad.Parent = border
-
--- Animate the border rotation
-spawn(function()
-    while wait(0.05) do
-        borderGrad.Rotation = (borderGrad.Rotation + 0.5) % 360
-    end
-end)
-
--- Actual glass background (with slight transparency)
+-- Inner glass (dark)
 local glass = Instance.new("Frame")
 glass.Size = UDim2.new(1, -4, 1, -4)
 glass.Position = UDim2.new(0, 2, 0, 2)
-glass.BackgroundColor3 = Color3.fromRGB(15, 12, 35)
-glass.BackgroundTransparency = 0.25
+glass.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+glass.BackgroundTransparency = 0.2
 glass.BorderSizePixel = 0
 glass.Parent = mainFrame
 
--- Title + Sea + Stats (top row)
+-- Title Bar (drag handle)
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundTransparency = 1
+titleBar.Parent = glass
+
+-- (Optional) A subtle drag indicator
+local dragHandle = Instance.new("TextLabel")
+dragHandle.Size = UDim2.new(0, 20, 1, 0)
+dragHandle.Position = UDim2.new(0, 5, 0, 0)
+dragHandle.BackgroundTransparency = 1
+dragHandle.Text = "≡"
+dragHandle.TextColor3 = Color3.fromRGB(255, 215, 0)
+dragHandle.TextScaled = true
+dragHandle.Font = Enum.Font.GothamBold
+dragHandle.Parent = titleBar
+
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0, 80, 0, 28)
-title.Position = UDim2.new(0, 10, 0, 5)
+title.Size = UDim2.new(0, 90, 1, 0)
+title.Position = UDim2.new(0, 30, 0, 0)
 title.BackgroundTransparency = 1
 title.Text = "⚡RITUAL"
-title.TextColor3 = Color3.fromRGB(255, 200, 100)
+title.TextColor3 = Color3.fromRGB(255, 215, 0)
 title.TextScaled = true
 title.Font = Enum.Font.GothamBold
-title.Parent = glass
+title.Parent = titleBar
 
 local seaLabel = Instance.new("TextLabel")
-seaLabel.Size = UDim2.new(0, 45, 0, 28)
-seaLabel.Position = UDim2.new(0, 95, 0, 5)
+seaLabel.Size = UDim2.new(0, 60, 1, 0)
+seaLabel.Position = UDim2.new(0, 130, 0, 0)
 seaLabel.BackgroundTransparency = 1
 seaLabel.Text = "🌊 "..getSea()
-seaLabel.TextColor3 = Color3.fromRGB(100, 220, 255)
+seaLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
 seaLabel.TextScaled = true
 seaLabel.Font = Enum.Font.GothamMedium
-seaLabel.Parent = glass
+seaLabel.Parent = titleBar
 
 local statsLabel = Instance.new("TextLabel")
-statsLabel.Size = UDim2.new(0, 200, 0, 28)
-statsLabel.Position = UDim2.new(0, 150, 0, 5)
+statsLabel.Size = UDim2.new(0, 190, 1, 0)
+statsLabel.Position = UDim2.new(0, 200, 0, 0)
 statsLabel.BackgroundTransparency = 1
 statsLabel.Text = "Lv.0  $0  🍎None  💎0"
-statsLabel.TextColor3 = Color3.fromRGB(220, 220, 255)
+statsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 statsLabel.TextScaled = true
 statsLabel.Font = Enum.Font.GothamMedium
-statsLabel.Parent = glass
+statsLabel.Parent = titleBar
 
--- Minimize / Close (neon buttons)
-local function createNeonButton(text, posX, color, callback)
+-- Minimize & Close (gold border)
+local function createGoldButton(text, posX, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0, 32, 0, 28)
-    btn.Position = UDim2.new(1, posX, 0, 5)
-    btn.BackgroundColor3 = color
+    btn.Position = UDim2.new(1, posX, 0, 6)
+    btn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
     btn.BackgroundTransparency = 0.3
     btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextColor3 = Color3.fromRGB(255, 215, 0)
     btn.TextScaled = true
     btn.Font = Enum.Font.GothamBold
     btn.BorderSizePixel = 1
-    btn.BorderColor3 = color
-    btn.Parent = glass
+    btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
+    btn.Parent = titleBar
     btn.MouseButton1Click:Connect(callback)
     return btn
 end
 
-local minBtn = createNeonButton("−", -70, Color3.fromRGB(100, 60, 200), function()
+local minimized = false
+local minBtn = createGoldButton("−", -70, function()
     minimized = not minimized
     if minimized then
         mainFrame:TweenSize(UDim2.new(0, 180, 0, 32), "Out", "Quad", 0.25, true)
         minBtn.Text = "+"
         for _, c in pairs(glass:GetChildren()) do
-            if c ~= title and c ~= seaLabel and c ~= statsLabel and c ~= minBtn and c ~= closeBtn then
+            if c ~= titleBar and c ~= minBtn and c ~= closeBtn then
                 c.Visible = false
             end
         end
     else
-        mainFrame:TweenSize(UDim2.new(0, 780, 0, 120), "Out", "Quad", 0.25, true)
+        mainFrame:TweenSize(UDim2.new(0, 550, 0, 480), "Out", "Quad", 0.25, true)
         minBtn.Text = "−"
         for _, c in pairs(glass:GetChildren()) do
             c.Visible = true
@@ -244,185 +249,207 @@ local minBtn = createNeonButton("−", -70, Color3.fromRGB(100, 60, 200), functi
     end
 end)
 
-local closeBtn = createNeonButton("✕", -35, Color3.fromRGB(200, 40, 40), function()
+local closeBtn = createGoldButton("✕", -35, function()
     screenGui:Destroy()
 end)
 
-local minimized = false
-
--- Teleport Button (opens teleport panel)
-local teleBtn = Instance.new("TextButton")
-teleBtn.Size = UDim2.new(0, 50, 0, 28)
-teleBtn.Position = UDim2.new(1, -125, 0, 5)
-teleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 120)
-teleBtn.BackgroundTransparency = 0.3
-teleBtn.Text = "🗺️"
-teleBtn.TextColor3 = Color3.fromRGB(255,255,255)
-teleBtn.TextScaled = true
-teleBtn.Font = Enum.Font.GothamBold
-teleBtn.BorderSizePixel = 1
-teleBtn.BorderColor3 = Color3.fromRGB(100, 80, 255)
-teleBtn.Parent = glass
-
 -- ============================================================
---           TOGGLE BUTTONS (two rows, neon style)
+--             SIDE NAVIGATION TABS (Gold highlights)
 -- ============================================================
-local toggleList = {
-    {"Farm", "Farm"},
-    {"Quest", "Quest"},
-    {"Collect", "Collect"},
-    {"SeaBeast", "SeaBeast"},
-    {"Ship", "ShipFarm"},
-    {"Raid", "Raid"},
-    {"Dungeon", "Dungeon"},
-    {"Sniper", "FruitSniper"},
-    {"ESP", "ESP"},
-    {"Stats", "AutoStats"},
-    {"AntiAFK", "AntiAFK"}
-}
+local tabPanel = Instance.new("Frame")
+tabPanel.Size = UDim2.new(0, 85, 1, -40)
+tabPanel.Position = UDim2.new(0, 0, 0, 40)
+tabPanel.BackgroundTransparency = 1
+tabPanel.Parent = glass
 
-local btnW = 62
-local gap = 4
-local startX = 5
-local row1Y = 45
-local row2Y = 78
+local contentPanel = Instance.new("Frame")
+contentPanel.Size = UDim2.new(1, -95, 1, -40)
+contentPanel.Position = UDim2.new(0, 90, 0, 40)
+contentPanel.BackgroundTransparency = 1
+contentPanel.Parent = glass
 
-for i, data in ipairs(toggleList) do
-    local label = data[1]
-    local ref = data[2]
-    local row = (i <= 6) and 1 or 2
-    local col = (i <= 6) and i or (i-6)
-    local x = startX + (col-1) * (btnW + gap)
-    local y = (row == 1) and row1Y or row2Y
+local tabNames = {"Farm", "Raids", "Teleports", "Misc"}
+local tabButtons = {}
+local currentTab = "Farm"
+
+for i, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, btnW, 0, 30)
-    btn.Position = UDim2.new(0, x, 0, y)
-    btn.BackgroundColor3 = _G.Ritual[ref] and Color3.fromRGB(40, 200, 40) or Color3.fromRGB(50, 50, 90)
+    btn.Size = UDim2.new(1, -10, 0, 36)
+    btn.Position = UDim2.new(0, 5, 0, 10 + (i-1)*44)
+    btn.BackgroundColor3 = (name == currentTab) and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(25, 25, 25)
     btn.BackgroundTransparency = 0.2
-    btn.Text = label
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.Text = name
+    btn.TextColor3 = (name == currentTab) and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(255, 215, 0)
     btn.TextScaled = true
     btn.Font = Enum.Font.GothamBold
     btn.BorderSizePixel = 1
-    btn.BorderColor3 = _G.Ritual[ref] and Color3.fromRGB(100,255,100) or Color3.fromRGB(100,80,220)
-    btn.Parent = glass
+    btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
+    btn.Parent = tabPanel
+    tabButtons[name] = btn
+
     btn.MouseButton1Click:Connect(function()
-        local newState = not _G.Ritual[ref]
-        _G.Ritual[ref] = newState
-        btn.BackgroundColor3 = newState and Color3.fromRGB(40,200,40) or Color3.fromRGB(50,50,90)
-        btn.BorderColor3 = newState and Color3.fromRGB(100,255,100) or Color3.fromRGB(100,80,220)
-    end)
-    -- Hover glow
-    btn.MouseEnter:Connect(function()
-        btn.BackgroundTransparency = 0.05
-        btn.BorderSizePixel = 2
-    end)
-    btn.MouseLeave:Connect(function()
-        btn.BackgroundTransparency = 0.2
-        btn.BorderSizePixel = 1
+        currentTab = name
+        for _, v in pairs(tabButtons) do
+            v.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+            v.TextColor3 = Color3.fromRGB(255, 215, 0)
+        end
+        btn.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+        btn.TextColor3 = Color3.fromRGB(10, 10, 10)
+        for _, child in pairs(contentPanel:GetChildren()) do
+            if child:IsA("Frame") then child.Visible = false end
+        end
+        local content = contentPanel:FindFirstChild(name.."Content")
+        if content then content.Visible = true end
     end)
 end
 
 -- ============================================================
---              TELEPORT PANEL (Pop-up)
+--           HELPER: TOGGLE BUTTON (Gold/Black)
 -- ============================================================
-local telePanel = Instance.new("Frame")
-telePanel.Size = UDim2.new(0, 320, 0, 270)
-telePanel.Position = UDim2.new(0.5, -160, 0.5, -135)
-telePanel.BackgroundColor3 = Color3.fromRGB(12, 8, 28)
-telePanel.BackgroundTransparency = 0.15
-telePanel.BorderSizePixel = 2
-telePanel.BorderColor3 = Color3.fromRGB(120, 60, 255)
-telePanel.Visible = false
-telePanel.Active = true
-telePanel.Draggable = true
-telePanel.Parent = screenGui
+local function createToggle(parent, text, yPos, default, ref)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 170, 0, 36)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
+    btn.BackgroundColor3 = default and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(30, 30, 30)
+    btn.BackgroundTransparency = 0.2
+    btn.Text = text .. (default and " ✅" or " ❌")
+    btn.TextColor3 = default and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(255, 215, 0)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
+    btn.Parent = parent
+    if ref then _G.Ritual[ref] = default end
+    btn.MouseButton1Click:Connect(function()
+        local newState = not _G.Ritual[ref]
+        _G.Ritual[ref] = newState
+        btn.BackgroundColor3 = newState and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(30, 30, 30)
+        btn.TextColor3 = newState and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(255, 215, 0)
+        btn.Text = text .. (newState and " ✅" or " ❌")
+    end)
+    return btn
+end
 
--- Title bar with gradient
-local teleTitleBar = Instance.new("Frame")
-teleTitleBar.Size = UDim2.new(1, 0, 0, 35)
-teleTitleBar.BackgroundColor3 = Color3.fromRGB(30, 20, 70)
-teleTitleBar.BackgroundTransparency = 0.3
-teleTitleBar.BorderSizePixel = 0
-teleTitleBar.Parent = telePanel
+-- ============================================================
+--           CONTENT FRAMES FOR EACH TAB
+-- ============================================================
 
-local teleTitle = Instance.new("TextLabel")
-teleTitle.Size = UDim2.new(1, -35, 1, 0)
-teleTitle.Position = UDim2.new(0, 5, 0, 0)
-teleTitle.BackgroundTransparency = 1
-teleTitle.Text = "🗺️ Teleports (1st Sea)"
-teleTitle.TextColor3 = Color3.fromRGB(255, 200, 100)
-teleTitle.TextScaled = true
-teleTitle.Font = Enum.Font.GothamBold
-teleTitle.Parent = teleTitleBar
+-- 1. Farm Tab
+local farmContent = Instance.new("Frame")
+farmContent.Name = "FarmContent"
+farmContent.Size = UDim2.new(1, 0, 1, 0)
+farmContent.BackgroundTransparency = 1
+farmContent.Parent = contentPanel
 
-local closeTele = Instance.new("TextButton")
-closeTele.Size = UDim2.new(0, 30, 1, 0)
-closeTele.Position = UDim2.new(1, -30, 0, 0)
-closeTele.BackgroundColor3 = Color3.fromRGB(200,40,40)
-closeTele.BackgroundTransparency = 0.3
-closeTele.Text = "✕"
-closeTele.TextColor3 = Color3.fromRGB(255,255,255)
-closeTele.TextScaled = true
-closeTele.Font = Enum.Font.GothamBold
-closeTele.BorderSizePixel = 0
-closeTele.Parent = teleTitleBar
-closeTele.MouseButton1Click:Connect(function() telePanel.Visible = false end)
+createToggle(farmContent, "Auto Farm", 10, false, "Farm")
+createToggle(farmContent, "Auto Quest", 55, false, "Quest")
+createToggle(farmContent, "Auto Collect", 100, false, "Collect")
+createToggle(farmContent, "Auto Sea Beast", 145, false, "SeaBeast")
+createToggle(farmContent, "Auto Ship Farm", 190, false, "ShipFarm")
+createToggle(farmContent, "Anti AFK", 235, true, "AntiAFK")
+createToggle(farmContent, "Auto Stats", 280, false, "AutoStats")
+-- Add one extra empty space for padding (optional)
 
--- Scrollable frame for buttons
+-- 2. Raids Tab
+local raidContent = Instance.new("Frame")
+raidContent.Name = "RaidsContent"
+raidContent.Size = UDim2.new(1, 0, 1, 0)
+raidContent.BackgroundTransparency = 1
+raidContent.Visible = false
+raidContent.Parent = contentPanel
+
+createToggle(raidContent, "Auto Raid (Awaken)", 10, false, "Raid")
+createToggle(raidContent, "Auto Dungeon", 55, false, "Dungeon")
+
+local raidInfo = Instance.new("TextLabel")
+raidInfo.Size = UDim2.new(0.9, 0, 0, 60)
+raidInfo.Position = UDim2.new(0.05, 0, 0, 120)
+raidInfo.BackgroundTransparency = 0.5
+raidInfo.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+raidInfo.BorderSizePixel = 1
+raidInfo.BorderColor3 = Color3.fromRGB(255, 215, 0)
+raidInfo.Text = "⚔️ Auto Raid: enters and clears raids\n🏰 Auto Dungeon: clears Castle on Sea"
+raidInfo.TextColor3 = Color3.fromRGB(200, 200, 200)
+raidInfo.TextScaled = true
+raidInfo.Font = Enum.Font.GothamMedium
+raidInfo.Parent = raidContent
+
+-- 3. Teleports Tab
+local teleContent = Instance.new("Frame")
+teleContent.Name = "TeleportsContent"
+teleContent.Size = UDim2.new(1, 0, 1, 0)
+teleContent.BackgroundTransparency = 1
+teleContent.Visible = false
+teleContent.Parent = contentPanel
+
 local teleScroll = Instance.new("ScrollingFrame")
-teleScroll.Size = UDim2.new(1, 0, 1, -35)
-teleScroll.Position = UDim2.new(0, 0, 0, 35)
+teleScroll.Size = UDim2.new(1, 0, 1, 0)
 teleScroll.BackgroundTransparency = 1
 teleScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 teleScroll.ScrollBarThickness = 4
-teleScroll.Parent = telePanel
+teleScroll.Parent = teleContent
 
-teleBtn.MouseButton1Click:Connect(function()
-    telePanel.Visible = not telePanel.Visible
-    updateTeleports()
-end)
-
--- Function to update teleport buttons based on current sea
-local function updateTeleports()
+local function updateTeleportButtons()
     for _, child in pairs(teleScroll:GetChildren()) do
         if child:IsA("TextButton") then child:Destroy() end
     end
     local sea = getSea()
-    teleTitle.Text = "🗺️ Teleports ("..sea.." Sea)"
     local locs = islands[sea] or {}
     local y = 5
     for _, loc in ipairs(locs) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0.9, 0, 0, 38)
         btn.Position = UDim2.new(0.05, 0, 0, y)
-        btn.BackgroundColor3 = Color3.fromRGB(40, 35, 80)
+        btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
         btn.BackgroundTransparency = 0.2
         btn.Text = loc[1]
-        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.TextColor3 = Color3.fromRGB(255, 215, 0)
         btn.TextScaled = true
         btn.Font = Enum.Font.GothamMedium
         btn.BorderSizePixel = 1
-        btn.BorderColor3 = Color3.fromRGB(100, 80, 220)
+        btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
         btn.Parent = teleScroll
         btn.MouseButton1Click:Connect(function()
             tweenTo(loc[2] + Vector3.new(0, 15, 0), 200)
-            telePanel.Visible = false
         end)
         y = y + 44
     end
     teleScroll.CanvasSize = UDim2.new(0, 0, 0, y + 10)
 end
 
--- Update teleports every 3 seconds (sea change)
+updateTeleportButtons()
 spawn(function()
     while wait(3) do
-        updateTeleports()
+        updateTeleportButtons()
     end
 end)
 
+-- 4. Misc Tab
+local miscContent = Instance.new("Frame")
+miscContent.Name = "MiscContent"
+miscContent.Size = UDim2.new(1, 0, 1, 0)
+miscContent.BackgroundTransparency = 1
+miscContent.Visible = false
+miscContent.Parent = contentPanel
+
+createToggle(miscContent, "Fruit Sniper", 10, false, "FruitSniper")
+createToggle(miscContent, "ESP (Fruits/Chests)", 55, false, "ESP")
+
+local miscInfo = Instance.new("TextLabel")
+miscInfo.Size = UDim2.new(0.9, 0, 0, 60)
+miscInfo.Position = UDim2.new(0.05, 0, 0, 120)
+miscInfo.BackgroundTransparency = 0.5
+miscInfo.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+miscInfo.BorderSizePixel = 1
+miscInfo.BorderColor3 = Color3.fromRGB(255, 215, 0)
+miscInfo.Text = "🍎 Fruit Sniper: tweens to fruits\n👁️ ESP: highlights fruits (red) & chests (yellow)"
+miscInfo.TextColor3 = Color3.fromRGB(200, 200, 200)
+miscInfo.TextScaled = true
+miscInfo.Font = Enum.Font.GothamMedium
+miscInfo.Parent = miscContent
+
 -- ============================================================
---                  STATS UPDATE LOOP
+--              STATS UPDATE LOOP
 -- ============================================================
 spawn(function()
     while wait(1) do
@@ -441,22 +468,9 @@ spawn(function()
 end)
 
 -- ============================================================
---                  ALL FEATURE LOOPS
+--           FEATURE LOOPS (all working)
 -- ============================================================
 
--- 1. Auto Farm
-spawn(function()
-    while wait(0.1) do
-        if _G.Ritual.Farm and character and rootPart then
-            pcall(function()
-                local enemy = getNearestEnemy(500)
-                if enemy then attackTarget(enemy) end
-            end)
-        end
-    end
-end)
-
--- 2. Auto Quest
 function getQuestNPC()
     local lvl = player:FindFirstChild("Data") and player.Data:FindFirstChild("Level") and player.Data.Level.Value or 0
     local names = {"Pirate", "Monkey", "Soldier", "Bandit", "Mob Leader", "Marine", "Raider"}
@@ -472,6 +486,19 @@ function getQuestNPC()
     return nil
 end
 
+-- 1. Auto Farm
+spawn(function()
+    while wait(0.1) do
+        if _G.Ritual.Farm and character and rootPart then
+            pcall(function()
+                local enemy = getNearestEnemy(500)
+                if enemy then attackTarget(enemy) end
+            end)
+        end
+    end
+end)
+
+-- 2. Auto Quest
 spawn(function()
     while wait(1) do
         if _G.Ritual.Quest and character and rootPart then
@@ -687,4 +714,4 @@ spawn(function()
     end
 end)
 
-print("⚡ Ritual Hub (Neon Glass Edition) loaded successfully!")
+print("⚡ Ritual Hub (Gold & Black Final) loaded successfully!")
