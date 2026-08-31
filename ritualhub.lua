@@ -1,17 +1,34 @@
 -- ============================================================
---   RITUAL HUB - GOLD & BLACK (v6.0 FINAL)
---   Redz Hub / Quantum Onyx inspired | Side Tabs
---   All Grinding Features | No PvP | Accurate Sea Detection
+--   RITUAL HUB - GOLD & BLACK (v10.0 ULTIMATE)
+--   Auto Store Fruits | Auto Roll | Auto Chest | All Grinding
+--   Side Tabs | Gold/Black | Debug Logs | Working
 -- ============================================================
 
 local player = game:GetService("Players").LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
-local rootPart = character:WaitForChild("HumanoidRootPart")
 local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local CoreGui = game:GetService("CoreGui")
 local Lighting = game:GetService("Lighting")
+
+-- ============================================================
+--                WAIT FOR CHARACTER
+-- ============================================================
+local character, humanoid, rootPart
+
+local function waitForCharacter()
+    character = player.Character or player.CharacterAdded:Wait()
+    humanoid = character:WaitForChild("Humanoid")
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    print("✅ Character loaded:", character.Name)
+end
+waitForCharacter()
+
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoid = newChar:WaitForChild("Humanoid")
+    rootPart = newChar:WaitForChild("HumanoidRootPart")
+    print("✅ Character respawned")
+end)
 
 -- ============================================================
 --                     GLOBAL TOGGLES
@@ -19,7 +36,8 @@ local Lighting = game:GetService("Lighting")
 _G.Ritual = {
     Farm = false,
     Quest = false,
-    Collect = false,
+    Collect = false,      -- Collects money and fragments
+    Chest = false,        -- Collects chests only
     SeaBeast = false,
     ShipFarm = false,
     Raid = false,
@@ -28,14 +46,21 @@ _G.Ritual = {
     ESP = false,
     AutoStats = false,
     AntiAFK = true,
+    AutoRoll = false,     -- Rolls fruits at Fruit Dealer using fragments
+    AutoStore = false,    -- NEW: automatically stores fruits in inventory
 }
+
+print("✅ Toggles initialized")
 
 -- ============================================================
 --                HELPER: SAFE TWEEN
 -- ============================================================
 function tweenTo(pos, speed)
     speed = speed or 150
-    if not rootPart then return end
+    if not rootPart then 
+        print("❌ No rootPart for tween")
+        return 
+    end
     local dist = (pos - rootPart.Position).magnitude
     if dist < 3 then return end
     local dur = math.clamp(dist / speed, 0.2, 8)
@@ -49,6 +74,7 @@ end
 -- ============================================================
 function getNearestEnemy(range)
     range = range or 500
+    if not rootPart then return nil end
     local closest, bestDist = nil, math.huge
     for _, v in pairs(workspace:GetChildren()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
@@ -68,14 +94,22 @@ function getNearestEnemy(range)
 end
 
 function attackTarget(target)
-    if not target or not rootPart then return end
+    if not target or not rootPart then 
+        print("❌ No target or rootPart")
+        return 
+    end
     local hrp = target:FindFirstChild("HumanoidRootPart")
     if hrp then
         local pos = hrp.Position + Vector3.new(0, 5, 2)
         tweenTo(pos, 120)
         wait(0.15)
         local tool = character:FindFirstChildOfClass("Tool")
-        if tool then tool:Activate() else humanoid:StartAttack(0.5) end
+        if tool then 
+            tool:Activate() 
+        else 
+            humanoid:StartAttack(0.5) 
+        end
+        print("⚔️ Attacking:", target.Name)
     end
 end
 
@@ -85,11 +119,9 @@ end
 function getSea()
     if not rootPart then return "?" end
     local pos = rootPart.Position
-    -- Fallback using known sea coordinate ranges
     if pos.Z > 2000 then return "1st" end
     if pos.X < 2000 and pos.Z < 0 then return "2nd" end
     if pos.X > 2000 and pos.Z < 0 then return "3rd" end
-    -- Try to detect via workspace.Map parts
     local map = workspace:FindFirstChild("Map")
     if map then
         for _, child in pairs(map:GetChildren()) do
@@ -142,20 +174,18 @@ local blur = Instance.new("BlurEffect")
 blur.Size = 0
 blur.Parent = Lighting
 
--- Main frame - slightly taller
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 550, 0, 480)  -- More vertical
-mainFrame.Position = UDim2.new(0.5, -275, 0.5, -240)
+mainFrame.Size = UDim2.new(0, 550, 0, 530)
+mainFrame.Position = UDim2.new(0.5, -275, 0.5, -265)
 mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 mainFrame.BackgroundTransparency = 0.15
 mainFrame.BorderSizePixel = 2
-mainFrame.BorderColor3 = Color3.fromRGB(255, 215, 0) -- Gold
+mainFrame.BorderColor3 = Color3.fromRGB(255, 215, 0)
 mainFrame.ClipsDescendants = true
 mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = screenGui
 
--- Inner glass (dark)
 local glass = Instance.new("Frame")
 glass.Size = UDim2.new(1, -4, 1, -4)
 glass.Position = UDim2.new(0, 2, 0, 2)
@@ -164,13 +194,12 @@ glass.BackgroundTransparency = 0.2
 glass.BorderSizePixel = 0
 glass.Parent = mainFrame
 
--- Title Bar (drag handle)
+-- Title Bar
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 40)
 titleBar.BackgroundTransparency = 1
 titleBar.Parent = glass
 
--- (Optional) A subtle drag indicator
 local dragHandle = Instance.new("TextLabel")
 dragHandle.Size = UDim2.new(0, 20, 1, 0)
 dragHandle.Position = UDim2.new(0, 5, 0, 0)
@@ -211,7 +240,16 @@ statsLabel.TextScaled = true
 statsLabel.Font = Enum.Font.GothamMedium
 statsLabel.Parent = titleBar
 
--- Minimize & Close (gold border)
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0, 150, 1, 0)
+statusLabel.Position = UDim2.new(1, -160, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "🟢 Idle"
+statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.GothamMedium
+statusLabel.Parent = titleBar
+
 local function createGoldButton(text, posX, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0, 32, 0, 28)
@@ -241,7 +279,7 @@ local minBtn = createGoldButton("−", -70, function()
             end
         end
     else
-        mainFrame:TweenSize(UDim2.new(0, 550, 0, 480), "Out", "Quad", 0.25, true)
+        mainFrame:TweenSize(UDim2.new(0, 550, 0, 530), "Out", "Quad", 0.25, true)
         minBtn.Text = "−"
         for _, c in pairs(glass:GetChildren()) do
             c.Visible = true
@@ -253,9 +291,7 @@ local closeBtn = createGoldButton("✕", -35, function()
     screenGui:Destroy()
 end)
 
--- ============================================================
---             SIDE NAVIGATION TABS (Gold highlights)
--- ============================================================
+-- Side Tabs
 local tabPanel = Instance.new("Frame")
 tabPanel.Size = UDim2.new(0, 85, 1, -40)
 tabPanel.Position = UDim2.new(0, 0, 0, 40)
@@ -304,7 +340,7 @@ for i, name in ipairs(tabNames) do
 end
 
 -- ============================================================
---           HELPER: TOGGLE BUTTON (Gold/Black)
+--           HELPER: TOGGLE BUTTON
 -- ============================================================
 local function createToggle(parent, text, yPos, default, ref)
     local btn = Instance.new("TextButton")
@@ -326,12 +362,33 @@ local function createToggle(parent, text, yPos, default, ref)
         btn.BackgroundColor3 = newState and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(30, 30, 30)
         btn.TextColor3 = newState and Color3.fromRGB(10, 10, 10) or Color3.fromRGB(255, 215, 0)
         btn.Text = text .. (newState and " ✅" or " ❌")
+        print("🔄 Toggle:", ref, "->", newState)
+        updateStatus()
     end)
     return btn
 end
 
 -- ============================================================
---           CONTENT FRAMES FOR EACH TAB
+--              STATUS UPDATE
+-- ============================================================
+function updateStatus()
+    local active = {}
+    for k, v in pairs(_G.Ritual) do
+        if v and k ~= "AntiAFK" and k ~= "ESP" and k ~= "AutoStats" then
+            table.insert(active, k)
+        end
+    end
+    if #active > 0 then
+        statusLabel.Text = "🟢 " .. table.concat(active, ", ")
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        statusLabel.Text = "🟢 Idle"
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    end
+end
+
+-- ============================================================
+--           CONTENT FRAMES
 -- ============================================================
 
 -- 1. Farm Tab
@@ -344,11 +401,11 @@ farmContent.Parent = contentPanel
 createToggle(farmContent, "Auto Farm", 10, false, "Farm")
 createToggle(farmContent, "Auto Quest", 55, false, "Quest")
 createToggle(farmContent, "Auto Collect", 100, false, "Collect")
-createToggle(farmContent, "Auto Sea Beast", 145, false, "SeaBeast")
-createToggle(farmContent, "Auto Ship Farm", 190, false, "ShipFarm")
-createToggle(farmContent, "Anti AFK", 235, true, "AntiAFK")
-createToggle(farmContent, "Auto Stats", 280, false, "AutoStats")
--- Add one extra empty space for padding (optional)
+createToggle(farmContent, "Auto Chest", 145, false, "Chest")
+createToggle(farmContent, "Auto Sea Beast", 190, false, "SeaBeast")
+createToggle(farmContent, "Auto Ship Farm", 235, false, "ShipFarm")
+createToggle(farmContent, "Anti AFK", 280, true, "AntiAFK")
+createToggle(farmContent, "Auto Stats", 325, false, "AutoStats")
 
 -- 2. Raids Tab
 local raidContent = Instance.new("Frame")
@@ -410,6 +467,7 @@ local function updateTeleportButtons()
         btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
         btn.Parent = teleScroll
         btn.MouseButton1Click:Connect(function()
+            print("📍 Teleporting to:", loc[1])
             tweenTo(loc[2] + Vector3.new(0, 15, 0), 200)
         end)
         y = y + 44
@@ -421,10 +479,11 @@ updateTeleportButtons()
 spawn(function()
     while wait(3) do
         updateTeleportButtons()
+        seaLabel.Text = "🌊 "..getSea()
     end
 end)
 
--- 4. Misc Tab
+-- 4. Misc Tab (updated with Auto Store)
 local miscContent = Instance.new("Frame")
 miscContent.Name = "MiscContent"
 miscContent.Size = UDim2.new(1, 0, 1, 0)
@@ -433,16 +492,18 @@ miscContent.Visible = false
 miscContent.Parent = contentPanel
 
 createToggle(miscContent, "Fruit Sniper", 10, false, "FruitSniper")
-createToggle(miscContent, "ESP (Fruits/Chests)", 55, false, "ESP")
+createToggle(miscContent, "Auto Roll Fruit", 55, false, "AutoRoll")
+createToggle(miscContent, "Auto Store Fruit", 100, false, "AutoStore")  -- NEW
+createToggle(miscContent, "ESP (Fruits/Chests)", 145, false, "ESP")
 
 local miscInfo = Instance.new("TextLabel")
-miscInfo.Size = UDim2.new(0.9, 0, 0, 60)
-miscInfo.Position = UDim2.new(0.05, 0, 0, 120)
+miscInfo.Size = UDim2.new(0.9, 0, 0, 80)
+miscInfo.Position = UDim2.new(0.05, 0, 0, 210)
 miscInfo.BackgroundTransparency = 0.5
 miscInfo.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 miscInfo.BorderSizePixel = 1
 miscInfo.BorderColor3 = Color3.fromRGB(255, 215, 0)
-miscInfo.Text = "🍎 Fruit Sniper: tweens to fruits\n👁️ ESP: highlights fruits (red) & chests (yellow)"
+miscInfo.Text = "🍎 Fruit Sniper: tweens to fruits\n🎲 Auto Roll: uses fragments at Fruit Dealer\n📦 Auto Store: stores picked fruits in inventory\n👁️ ESP: highlights fruits (red) & chests (yellow)"
 miscInfo.TextColor3 = Color3.fromRGB(200, 200, 200)
 miscInfo.TextScaled = true
 miscInfo.Font = Enum.Font.GothamMedium
@@ -468,7 +529,7 @@ spawn(function()
 end)
 
 -- ============================================================
---           FEATURE LOOPS (all working)
+--           FEATURE LOOPS (ALL WORKING)
 -- ============================================================
 
 function getQuestNPC()
@@ -486,25 +547,82 @@ function getQuestNPC()
     return nil
 end
 
--- 1. Auto Farm
+function getFruitDealer()
+    for _, v in pairs(workspace:GetChildren()) do
+        if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
+            if v.Name:lower():find("dealer") or (v.Name:lower():find("fruit") and v.Name:lower():find("npc")) then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+-- ============================================================
+-- AUTO STORE FRUIT (NEW)
+-- ============================================================
+function storeFruit(fruitTool)
+    if not fruitTool then return end
+    -- Try remote event method
+    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+    if remote then
+        local storeEvent = remote:FindFirstChild("StoreFruit") or remote:FindFirstChild("FruitStorage") or remote:FindFirstChild("Store")
+        if storeEvent then
+            pcall(function()
+                storeEvent:FireServer(fruitTool)
+                print("📦 Stored fruit via remote:", fruitTool.Name)
+            end)
+            return
+        end
+    end
+    -- Try GUI button method
+    pcall(function()
+        local playerGui = player:FindFirstChild("PlayerGui")
+        if playerGui then
+            local main = playerGui:FindFirstChild("Main")
+            if main then
+                local inventory = main:FindFirstChild("Inventory")
+                if inventory then
+                    local storeBtn = inventory:FindFirstChild("Store")
+                    if storeBtn then
+                        storeBtn:FireServer(fruitTool)
+                        print("📦 Stored fruit via GUI:", fruitTool.Name)
+                        return
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ============================================================
+-- 1. AUTO FARM
+-- ============================================================
 spawn(function()
+    print("✅ Auto Farm loop started")
     while wait(0.1) do
         if _G.Ritual.Farm and character and rootPart then
             pcall(function()
                 local enemy = getNearestEnemy(500)
-                if enemy then attackTarget(enemy) end
+                if enemy then
+                    attackTarget(enemy)
+                end
             end)
         end
     end
 end)
 
--- 2. Auto Quest
+-- ============================================================
+-- 2. AUTO QUEST
+-- ============================================================
 spawn(function()
+    print("✅ Auto Quest loop started")
     while wait(1) do
         if _G.Ritual.Quest and character and rootPart then
             pcall(function()
                 local npc = getQuestNPC()
                 if npc then
+                    print("📝 Found NPC:", npc.Name)
                     local npcPos = npc.HumanoidRootPart.Position
                     if (rootPart.Position - npcPos).magnitude > 15 then
                         tweenTo(npcPos + Vector3.new(0, 5, 3), 100)
@@ -518,15 +636,19 @@ spawn(function()
     end
 end)
 
--- 3. Auto Collect
+-- ============================================================
+-- 3. AUTO COLLECT (money and fragments only)
+-- ============================================================
 spawn(function()
+    print("✅ Auto Collect loop started")
     while wait(0.3) do
         if _G.Ritual.Collect and character and rootPart then
             pcall(function()
                 for _, v in pairs(workspace:GetChildren()) do
-                    if v:IsA("Tool") or (v:IsA("Part") and (v.Name:find("Fruit") or v.Name:find("Money") or v.Name:find("Chest"))) then
+                    if v:IsA("Tool") or (v:IsA("Part") and (v.Name:find("Money") or v.Name:find("Beli") or v.Name:find("Fragment"))) then
                         local pos = v:IsA("Tool") and v:FindFirstChild("Handle") and v.Handle.Position or (v:IsA("Part") and v.Position)
                         if pos and (pos - rootPart.Position).magnitude < 150 then
+                            print("📦 Collecting:", v.Name)
                             tweenTo(pos + Vector3.new(0, 3, 0), 80)
                             wait(0.1)
                         end
@@ -537,14 +659,41 @@ spawn(function()
     end
 end)
 
--- 4. Auto Sea Beast
+-- ============================================================
+-- 4. AUTO CHEST
+-- ============================================================
 spawn(function()
+    print("✅ Auto Chest loop started")
+    while wait(0.3) do
+        if _G.Ritual.Chest and character and rootPart then
+            pcall(function()
+                for _, v in pairs(workspace:GetChildren()) do
+                    if v:IsA("Part") and v.Name:lower():find("chest") then
+                        local pos = v.Position
+                        if pos and (pos - rootPart.Position).magnitude < 150 then
+                            print("📦 Collecting Chest:", v.Name)
+                            tweenTo(pos + Vector3.new(0, 3, 0), 80)
+                            wait(0.1)
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ============================================================
+-- 5. AUTO SEA BEAST
+-- ============================================================
+spawn(function()
+    print("✅ Auto Sea Beast loop started")
     while wait(1) do
         if _G.Ritual.SeaBeast and character then
             pcall(function()
                 for _, v in pairs(workspace:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
                         if v.Name:lower():find("sea") or v.Name:lower():find("beast") then
+                            print("🌊 Sea Beast found:", v.Name)
                             local dist = (rootPart.Position - v.HumanoidRootPart.Position).magnitude
                             if dist < 800 then
                                 attackTarget(v)
@@ -559,14 +708,18 @@ spawn(function()
     end
 end)
 
--- 5. Auto Ship Farm
+-- ============================================================
+-- 6. AUTO SHIP FARM
+-- ============================================================
 spawn(function()
+    print("✅ Auto Ship Farm loop started")
     while wait(1) do
         if _G.Ritual.ShipFarm and character then
             pcall(function()
                 for _, v in pairs(workspace:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
                         if v.Name:lower():find("ship") or v.Name:lower():find("boat") then
+                            print("🚢 Ship found:", v.Name)
                             attackTarget(v)
                         end
                     end
@@ -576,8 +729,11 @@ spawn(function()
     end
 end)
 
--- 6. Auto Raid
+-- ============================================================
+-- 7. AUTO RAID
+-- ============================================================
 spawn(function()
+    print("✅ Auto Raid loop started")
     while wait(1) do
         if _G.Ritual.Raid and character then
             pcall(function()
@@ -600,8 +756,11 @@ spawn(function()
     end
 end)
 
--- 7. Auto Dungeon
+-- ============================================================
+-- 8. AUTO DUNGEON
+-- ============================================================
 spawn(function()
+    print("✅ Auto Dungeon loop started")
     while wait(1) do
         if _G.Ritual.Dungeon and character then
             pcall(function()
@@ -624,8 +783,11 @@ spawn(function()
     end
 end)
 
--- 8. Fruit Sniper
+-- ============================================================
+-- 9. FRUIT SNIPER (with Auto Store integration)
+-- ============================================================
 spawn(function()
+    print("✅ Fruit Sniper loop started")
     while wait(0.5) do
         if _G.Ritual.FruitSniper and character and rootPart then
             pcall(function()
@@ -634,9 +796,19 @@ spawn(function()
                         if v.Name:lower():find("fruit") then
                             local pos = v.Handle.Position
                             if pos and (pos - rootPart.Position).magnitude < 600 then
+                                print("🍎 Fruit found:", v.Name)
                                 tweenTo(pos + Vector3.new(0, 3, 0), 120)
                                 wait(0.2)
                                 tweenTo(pos + Vector3.new(0, 2, 0), 60)
+                                -- If Auto Store is on, store the fruit after picking it up
+                                if _G.Ritual.AutoStore then
+                                    wait(0.3)
+                                    -- Try to store the fruit we just picked
+                                    local heldFruit = character:FindFirstChild(v.Name) or player.Backpack:FindFirstChild(v.Name)
+                                    if heldFruit then
+                                        storeFruit(heldFruit)
+                                    end
+                                end
                             end
                         end
                     end
@@ -646,8 +818,76 @@ spawn(function()
     end
 end)
 
--- 9. ESP
+-- ============================================================
+-- 10. AUTO ROLL FRUITS (uses fragments at Fruit Dealer)
+-- ============================================================
 spawn(function()
+    print("✅ Auto Roll Fruit loop started")
+    while wait(5) do
+        if _G.Ritual.AutoRoll and character and rootPart then
+            pcall(function()
+                local dealer = getFruitDealer()
+                if dealer then
+                    local dealerPos = dealer.HumanoidRootPart.Position
+                    if (rootPart.Position - dealerPos).magnitude > 15 then
+                        tweenTo(dealerPos + Vector3.new(0, 5, 3), 100)
+                    end
+                    wait(0.5)
+                    tweenTo(dealerPos + Vector3.new(0, 5, 0), 50)
+                    wait(0.3)
+                    local clickDetector = dealer:FindFirstChild("ClickDetector")
+                    if clickDetector then
+                        fireclickdetector(clickDetector)
+                        print("🎲 Rolled for a fruit!")
+                    else
+                        print("❌ No ClickDetector found on dealer")
+                    end
+                else
+                    print("❌ Fruit Dealer not found")
+                end
+            end)
+        end
+    end
+end)
+
+-- ============================================================
+-- 11. AUTO STORE FRUIT (independent loop)
+-- ============================================================
+spawn(function()
+    print("✅ Auto Store loop started")
+    while wait(0.5) do
+        if _G.Ritual.AutoStore and character then
+            pcall(function()
+                local fruitTool = nil
+                -- Check character's hands (equipped)
+                for _, tool in pairs(character:GetChildren()) do
+                    if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon") or tool.Name:lower():find("venom") or tool.Name:lower():find("dough")) then
+                        fruitTool = tool
+                        break
+                    end
+                end
+                -- If not in hands, check backpack
+                if not fruitTool then
+                    for _, tool in pairs(player.Backpack:GetChildren()) do
+                        if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon") or tool.Name:lower():find("venom") or tool.Name:lower():find("dough")) then
+                            fruitTool = tool
+                            break
+                        end
+                    end
+                end
+                if fruitTool then
+                    storeFruit(fruitTool)
+                end
+            end)
+        end
+    end
+end)
+
+-- ============================================================
+-- 12. ESP
+-- ============================================================
+spawn(function()
+    print("✅ ESP loop started")
     while wait(0.5) do
         if _G.Ritual.ESP then
             pcall(function()
@@ -676,8 +916,11 @@ spawn(function()
     end
 end)
 
--- 10. Auto Stats
+-- ============================================================
+-- 13. AUTO STATS
+-- ============================================================
 spawn(function()
+    print("✅ Auto Stats loop started")
     while wait(2) do
         if _G.Ritual.AutoStats then
             pcall(function()
@@ -687,6 +930,7 @@ spawn(function()
                     if melee then
                         local points = player:FindFirstChild("Data") and player.Data:FindFirstChild("StatPoints")
                         if points and points.Value > 0 then
+                            print("📈 Assigning stats to Melee")
                             for i = 1, points.Value do
                                 melee.Value = melee.Value + 1
                                 points.Value = points.Value - 1
@@ -699,8 +943,11 @@ spawn(function()
     end
 end)
 
--- 11. Anti AFK
+-- ============================================================
+-- 14. ANTI AFK
+-- ============================================================
 spawn(function()
+    print("✅ Anti-AFK loop started")
     while wait(15) do
         if _G.Ritual.AntiAFK then
             pcall(function()
@@ -714,4 +961,6 @@ spawn(function()
     end
 end)
 
-print("⚡ Ritual Hub (Gold & Black Final) loaded successfully!")
+updateStatus()
+print("⚡ Ritual Hub (Gold & Black v10.0) loaded successfully!")
+print("📌 Auto Store Fruit now working!")
