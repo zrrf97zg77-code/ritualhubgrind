@@ -1,7 +1,6 @@
 -- ============================================================
---   RITUAL HUB - GOLD & BLACK (v13.0 ULTIMATE)
---   Fast Attack | Hitbox Extender | Auto Quest Fixed
---   ESP Fixed | Auto Chest Fixed | Faster Tweens
+--   RITUAL HUB - GOLD & BLACK (v16.0)
+--   Hitbox Extender | NPC Pull | Auto Equip | Fast Attack
 -- ============================================================
 
 local player = game:GetService("Players").LocalPlayer
@@ -35,7 +34,7 @@ end)
 --                     GLOBAL TOGGLES
 -- ============================================================
 _G.Ritual = {
-    Farm = false,
+    Leveling = false,
     Quest = false,
     Chest = false,
     SeaBeast = false,
@@ -50,13 +49,14 @@ _G.Ritual = {
     AutoStore = false,
 }
 
+local selectedWeapon = "Melee" -- Options: "Melee", "Sword", "Gun", "Fruit"
 print("✅ Toggles initialized")
 
 -- ============================================================
 --                HELPER: FASTER TWEEN (speed 350)
 -- ============================================================
 function tweenTo(pos, speed)
-    speed = speed or 350  -- MUCH FASTER
+    speed = speed or 350
     if not rootPart then return end
     local dist = (pos - rootPart.Position).magnitude
     if dist < 3 then return end
@@ -69,18 +69,58 @@ end
 -- ============================================================
 --                HITBOX EXTENDER
 -- ============================================================
-local function extendHitbox()
+function extendHitbox()
     pcall(function()
         if rootPart then
-            rootPart.Size = Vector3.new(12, 8, 12)  -- Bigger hitbox
-            -- Also try to extend all other parts
-            for _, part in pairs(character:GetChildren()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.Size = Vector3.new(8, 4, 8)
+            rootPart.Size = Vector3.new(10, 6, 10)  -- Big hitbox, visually not too huge
+        end
+    end)
+end
+
+-- ============================================================
+--                AUTO EQUIP SELECTED WEAPON
+-- ============================================================
+function equipWeapon(weaponType)
+    pcall(function()
+        local current = character:FindFirstChildOfClass("Tool")
+        if current then
+            local name = current.Name:lower()
+            local match = false
+            if weaponType == "Melee" and (name:find("sword") or name:find("blade") or name:find("katana") or name:find("club") or name:find("fist") or name:find("trident") or name:find("pole") or name:find("axe") or name:find("hammer")) then
+                match = true
+            elseif weaponType == "Sword" and (name:find("sword") or name:find("blade") or name:find("katana") or name:find("cutlass") or name:find("saber") or name:find("longsword")) then
+                match = true
+            elseif weaponType == "Gun" and (name:find("gun") or name:find("pistol") or name:find("rifle") or name:find("cannon") or name:find("flintlock") or name:find("revolver")) then
+                match = true
+            elseif weaponType == "Fruit" and (name:find("fruit") or name:find("leopard") or name:find("dragon") or name:find("venom") or name:find("dough") or name:find("buddha") or name:find("flame") or name:find("ice") or name:find("light") or name:find("dark") or name:find("shadow")) then
+                match = true
+            end
+            if match then return current end
+        end
+
+        for _, tool in pairs(player.Backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                local name = tool.Name:lower()
+                local match = false
+                if weaponType == "Melee" and (name:find("sword") or name:find("blade") or name:find("katana") or name:find("club") or name:find("fist") or name:find("trident") or name:find("pole") or name:find("axe") or name:find("hammer")) then
+                    match = true
+                elseif weaponType == "Sword" and (name:find("sword") or name:find("blade") or name:find("katana") or name:find("cutlass") or name:find("saber") or name:find("longsword")) then
+                    match = true
+                elseif weaponType == "Gun" and (name:find("gun") or name:find("pistol") or name:find("rifle") or name:find("cannon") or name:find("flintlock") or name:find("revolver")) then
+                    match = true
+                elseif weaponType == "Fruit" and (name:find("fruit") or name:find("leopard") or name:find("dragon") or name:find("venom") or name:find("dough") or name:find("buddha") or name:find("flame") or name:find("ice") or name:find("light") or name:find("dark") or name:find("shadow")) then
+                    match = true
+                end
+                if match then
+                    tool.Parent = character
+                    task.wait(0.1)
+                    return tool
                 end
             end
         end
+        return nil
     end)
+    return nil
 end
 
 -- ============================================================
@@ -89,13 +129,15 @@ end
 local function fastAttack()
     pcall(function()
         local tool = character:FindFirstChildOfClass("Tool")
+        if not tool then
+            tool = equipWeapon(selectedWeapon)
+        end
         if tool then
             tool:Activate()
         else
             humanoid:StartAttack(0.5)
         end
-        -- Faster attack by triggering multiple times
-        task.wait(0.02)
+        task.wait(0.01)  -- Very fast
         if tool then
             tool:Activate()
         else
@@ -128,20 +170,43 @@ function getNearestEnemy(range)
     return closest
 end
 
+-- ============================================================
+--                NPC PULL (brings NPCs under you)
+-- ============================================================
+function pullNPCs()
+    pcall(function()
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
+                if v.Name ~= player.Name and not game:GetService("Players"):FindFirstChild(v.Name) then
+                    local hrp = v:FindFirstChild("HumanoidRootPart")
+                    if hrp and v.Humanoid.Health > 0 then
+                        local dist = (rootPart.Position - hrp.Position).magnitude
+                        if dist < 300 and dist > 5 then
+                            -- Move NPC toward player's position (but keep it slightly below)
+                            local targetPos = rootPart.Position + Vector3.new(0, -2, 0)
+                            hrp.CFrame = CFrame.new(hrp.Position + (targetPos - hrp.Position).unit * 3)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 function attackTarget(target)
     if not target or not rootPart then return end
     local hrp = target:FindFirstChild("HumanoidRootPart")
     if hrp then
-        -- Position higher up so NPCs can't hit you
-        local pos = hrp.Position + Vector3.new(0, 8, 2)  -- Higher (was 5)
+        -- Position higher above NPC (12 studs)
+        local pos = hrp.Position + Vector3.new(0, 12, 2)
         tweenTo(pos, 350)
         task.wait(0.05)
         extendHitbox()
         task.wait(0.05)
         -- Fast attack spam
-        for i = 1, 3 do
+        for i = 1, 4 do
             fastAttack()
-            task.wait(0.03)
+            task.wait(0.02)
         end
         print("⚔️ Attacking:", target.Name)
     end
@@ -173,7 +238,7 @@ function getSea()
 end
 
 -- ============================================================
---              FIND CHESTS & FRUITS (IMPROVED)
+--              FIND CHESTS & FRUITS (FIXED)
 -- ============================================================
 function findChests()
     local chests = {}
@@ -191,10 +256,13 @@ end
 function findFruits()
     local fruits = {}
     for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("Tool") and v:FindFirstChild("Handle") and v.Name:lower():find("fruit") then
+        if v:IsA("Tool") and v.Name:lower():find("fruit") then
             table.insert(fruits, v)
         elseif v:IsA("BasePart") and v.Name:lower():find("fruit") then
             table.insert(fruits, v)
+        elseif v:IsA("Model") and v.Name:lower():find("fruit") then
+            local mainPart = v:FindFirstChild("Handle") or v:FindFirstChild("Part") or v:FindFirstChildOfClass("BasePart")
+            if mainPart then table.insert(fruits, mainPart) end
         end
     end
     return fruits
@@ -233,8 +301,8 @@ screenGui.Parent = CoreGui
 screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 550, 0, 530)
-mainFrame.Position = UDim2.new(0.5, -275, 0.5, -265)
+mainFrame.Size = UDim2.new(0, 550, 0, 560)
+mainFrame.Position = UDim2.new(0.5, -275, 0.5, -280)
 mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 mainFrame.BackgroundTransparency = 0.15
 mainFrame.BorderSizePixel = 2
@@ -337,7 +405,7 @@ local minBtn = createGoldButton("−", -70, function()
             end
         end
     else
-        mainFrame:TweenSize(UDim2.new(0, 550, 0, 530), "Out", "Quad", 0.25, true)
+        mainFrame:TweenSize(UDim2.new(0, 550, 0, 560), "Out", "Quad", 0.25, true)
         minBtn.Text = "−"
         for _, c in pairs(glass:GetChildren()) do
             c.Visible = true
@@ -427,6 +495,54 @@ local function createToggle(parent, text, yPos, default, ref)
 end
 
 -- ============================================================
+--           WEAPON SELECTOR (Cycles)
+-- ============================================================
+local function createWeaponSelector(parent, yPos)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 170, 0, 36)
+    frame.Position = UDim2.new(0, 10, 0, yPos)
+    frame.BackgroundTransparency = 1
+    frame.Parent = parent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "Weapon:"
+    label.TextColor3 = Color3.fromRGB(255, 215, 0)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamMedium
+    label.Parent = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.5, 0, 1, 0)
+    btn.Position = UDim2.new(0.5, 0, 0, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 70)
+    btn.BackgroundTransparency = 0.2
+    btn.Text = selectedWeapon
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(255, 215, 0)
+    btn.Parent = frame
+
+    local weaponTypes = {"Melee", "Sword", "Gun", "Fruit"}
+    local currentIndex = 1
+    for i, w in ipairs(weaponTypes) do
+        if w == selectedWeapon then currentIndex = i break end
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        currentIndex = currentIndex % #weaponTypes + 1
+        selectedWeapon = weaponTypes[currentIndex]
+        btn.Text = selectedWeapon
+        print("🔧 Weapon changed to:", selectedWeapon)
+    end)
+    return frame
+end
+
+-- ============================================================
 --              STATUS UPDATE
 -- ============================================================
 function updateStatus()
@@ -456,13 +572,14 @@ farmContent.Size = UDim2.new(1, 0, 1, 0)
 farmContent.BackgroundTransparency = 1
 farmContent.Parent = contentPanel
 
-createToggle(farmContent, "Auto Farm", 10, false, "Farm")
-createToggle(farmContent, "Auto Quest", 55, false, "Quest")
-createToggle(farmContent, "Auto Chest", 100, false, "Chest")
-createToggle(farmContent, "Auto Sea Beast", 145, false, "SeaBeast")
-createToggle(farmContent, "Auto Ship Farm", 190, false, "ShipFarm")
-createToggle(farmContent, "Anti AFK", 235, true, "AntiAFK")
-createToggle(farmContent, "Auto Stats", 280, false, "AutoStats")
+createToggle(farmContent, "Auto Leveling", 10, false, "Leveling")
+createWeaponSelector(farmContent, 55)
+createToggle(farmContent, "Auto Quest", 110, false, "Quest")
+createToggle(farmContent, "Auto Chest", 155, false, "Chest")
+createToggle(farmContent, "Auto Sea Beast", 200, false, "SeaBeast")
+createToggle(farmContent, "Auto Ship Farm", 245, false, "ShipFarm")
+createToggle(farmContent, "Anti AFK", 290, true, "AntiAFK")
+createToggle(farmContent, "Auto Stats", 335, false, "AutoStats")
 
 -- 2. Raids Tab
 local raidContent = Instance.new("Frame")
@@ -585,7 +702,7 @@ spawn(function()
 end)
 
 -- ============================================================
---           FEATURE LOOPS (ALL FIXED)
+--           FEATURE LOOPS
 -- ============================================================
 
 function getQuestNPC()
@@ -630,13 +747,18 @@ function storeFruit(fruitTool)
 end
 
 -- ============================================================
--- 1. AUTO FARM (FAST ATTACK + HIGH POSITION + HITBOX)
+-- 1. AUTO LEVELING (with hitbox extender + NPC pull)
 -- ============================================================
 spawn(function()
-    print("✅ Auto Farm loop started")
-    while wait(0.05) do  -- Faster loop
-        if _G.Ritual.Farm and character and rootPart then
+    print("✅ Auto Leveling loop started")
+    while wait(0.05) do
+        if _G.Ritual.Leveling and character and rootPart then
             pcall(function()
+                -- Extend hitbox once per loop
+                extendHitbox()
+                -- Pull NPCs towards you
+                pullNPCs()
+                -- Attack nearest enemy
                 local enemy = getNearestEnemy(500)
                 if enemy then
                     attackTarget(enemy)
@@ -647,7 +769,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- 2. AUTO QUEST (ACTUALLY INTERACTS WITH NPC)
+-- 2. AUTO QUEST (interacts with NPC)
 -- ============================================================
 spawn(function()
     print("✅ Auto Quest loop started")
@@ -658,21 +780,17 @@ spawn(function()
                 if npc then
                     print("📝 Found NPC:", npc.Name)
                     local npcPos = npc.HumanoidRootPart.Position
-                    -- Tween to NPC (higher position)
                     if (rootPart.Position - npcPos).magnitude > 15 then
                         tweenTo(npcPos + Vector3.new(0, 7, 3), 350)
                     end
                     task.wait(0.2)
                     tweenTo(npcPos + Vector3.new(0, 7, 0), 350)
                     task.wait(0.2)
-                    
-                    -- INTERACT WITH NPC (fire ClickDetector)
                     local clickDetector = npc:FindFirstChild("ClickDetector")
                     if clickDetector then
                         fireclickdetector(clickDetector)
                         print("📞 Interacted with NPC:", npc.Name)
                     else
-                        -- Try remote event method
                         local remote = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
                         if remote then
                             local questRemote = remote:FindFirstChild("Quest") or remote:FindFirstChild("GetQuest")
@@ -690,7 +808,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- 3. AUTO CHEST (CONTINUOUS - NO RE-CLICK NEEDED)
+-- 3. AUTO CHEST (continuous)
 -- ============================================================
 spawn(function()
     print("✅ Auto Chest loop started")
@@ -703,7 +821,6 @@ spawn(function()
                         print("📦 Collecting Chest:", chest.Name)
                         tweenTo(pos + Vector3.new(0, 3, 0), 350)
                         task.wait(0.1)
-                        -- Also try to interact with chest
                         local clickDetector = chest.Parent:FindFirstChild("ClickDetector")
                         if clickDetector then
                             fireclickdetector(clickDetector)
@@ -815,7 +932,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- 8. FRUIT SNIPER
+-- 8. FRUIT SNIPER (FIXED)
 -- ============================================================
 spawn(function()
     print("✅ Fruit Sniper loop started")
@@ -904,7 +1021,6 @@ spawn(function()
     while wait(0.3) do
         if _G.Ritual.ESP then
             pcall(function()
-                -- Highlight fruits (RED)
                 for _, fruit in pairs(findFruits()) do
                     local parent = fruit:IsA("Tool") and fruit or fruit.Parent
                     if parent and not parent:FindFirstChild("RitualESP") then
@@ -917,7 +1033,6 @@ spawn(function()
                         h.Parent = parent
                     end
                 end
-                -- Highlight chests (YELLOW)
                 for _, chest in pairs(findChests()) do
                     local parent = chest:IsA("BasePart") and chest.Parent or chest
                     if parent and not parent:FindFirstChild("RitualESP") then
@@ -984,5 +1099,4 @@ spawn(function()
 end)
 
 updateStatus()
-print("⚡ Ritual Hub (v13.0) loaded successfully!")
-print("📌 Fast Attack | Hitbox Extender | Auto Quest Fixed | ESP Fixed")
+print("⚡ Ritual Hub (v16.0) loaded – Hitbox extender + NPC pull active!")
