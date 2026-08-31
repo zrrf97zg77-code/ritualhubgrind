@@ -240,19 +240,6 @@ _G.G_Ex_Gun_M1 = false;   _G.G_Ex_Gun_Z = false;   _G.G_Ex_Gun_X = false;   _G.G
 -- Variables
 SuperJumpEnabled = false 
 SuperJumpPower = 500 
-SanguineAutoEnabled = false
-SanguineWidgetVisible = false 
-SanguineAutoConnection = nil
-SanguineAutoDropDuration = 2.0
-SanguineAutoCooldown = false
-SanguineNoCDEnabled = false
-noCDCharConnection = nil
-SoulGuitarJumpEnabled = false
-SoulGuitarWidgetVisible = false
-SoulGuitarDashLength = 121 
-soulGuitarBusy = false
-fflagsThread = nil
-
 PortalSoruEnabled = false
 PortalSoruWidgetVisible = false
 BlacklistedPlayers = {}
@@ -1145,7 +1132,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- ESP
+-- ESP (Yellow Highlight)
 -- ============================================================
 _G.G_ESPEnabled       = false
 _G.G_ESP_Name         = true
@@ -1819,46 +1806,192 @@ spawn(function()
     end
 end)
 
-function performExtendedSoru(targetPos)
-    if not targetPos then return end
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local currentPos = hrp.Position
-    local fullDist = (targetPos - currentPos).Magnitude
-
-    if fullDist <= 950 then
-        pcall(function()
-            local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-            if commF then
-                commF:InvokeServer("Flashstep", targetPos)
-            else
-                hrp.CFrame = CFrame.new(targetPos)
-            end
-        end)
-    else
-        local steps = math.ceil(fullDist / 900)
-        local dir = (targetPos - currentPos).Unit
-        for i = 1, steps do
-            local nextDist = math.min(i * 900, fullDist)
-            local nextPos = currentPos + (dir * nextDist)
-            pcall(function()
-                local commF = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CommF_")
-                if commF then
-                    commF:InvokeServer("Flashstep", nextPos)
-                else
-                    hrp.CFrame = CFrame.new(nextPos)
-                end
-            end)
-            task.wait(0.015)
-        end
+-- ============================================================
+-- FOV CIRCLE & SKILL AIMBOT HOOK (FOV-based aiming)
+-- ============================================================
+local FOVCircle = nil
+pcall(function()
+    if Drawing and Drawing.new then
+        FOVCircle = Drawing.new("Circle")
+        FOVCircle.Visible = _G.G_SilentAimShowFOV
+        FOVCircle.Color = Color3.fromRGB(255, 215, 0) -- gold
+        FOVCircle.Radius = _G.G_SilentAimFOV
+        FOVCircle.Thickness = 2
+        FOVCircle.Filled = false
     end
+end)
+
+local currentSilentAimTarget = nil
+
+function IsSilentAimAlly(p)
+    local main = player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Main")
+    local frame = main and main:FindFirstChild("Allies")
+        and main.Allies:FindFirstChild("Container")
+        and main.Allies.Container:FindFirstChild("Allies")
+        and main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
+        and main.Allies.Container.Allies.ScrollingFrame:FindFirstChild("Frame")
+    if not frame then return false end
+    return frame:FindFirstChild(p.Name) ~= nil
 end
 
--- ============================================================
--- METAMETHODS (Silent Aim + Soru Aimbot)
--- ============================================================
+function IsSilentAimEnemy(p)
+    if not p or p == player then return false end
+    if IsSilentAimAlly(p) then return false end
+    local myTeam, targetTeam = player.Team, p.Team
+    if myTeam and targetTeam and myTeam.Name == "Marines" and targetTeam.Name == "Marines" then
+        return false
+    end
+    return true
+end
+
+function AX_ReadPvPState(target)
+    local ok, on = pcall(function()
+        local attr = target:GetAttribute("PvpDisabled")
+        if attr ~= nil then return attr ~= true end
+        local main = target.PlayerGui and target.PlayerGui:FindFirstChild("Main")
+        if main then
+            local dis = main:FindFirstChild("PvpDisabled")
+            if dis then return not dis.Visible end
+            local pvp = main:FindFirstChild("Pvp")
+            if pvp then
+                local frame = pvp:FindFirstChild("Frame")
+                if frame then
+                    local btn = frame:FindFirstChild("PvpButton") or frame:FindFirstChildOfClass("TextButton")
+                    if btn and btn:IsA("TextButton") then
+                        local txt = tostring(btn.Text or ""):upper()
+                        if txt:find("OFF") then return false end
+                        if txt:find("ON") then return true end
+                    end
+                end
+            end
+        end
+        return true
+    end)
+    return not ok or on
+end
+
+function AX_InSafeZone(target)
+    local ok, inZone = pcall(function()
+        local char = target.Character
+        if not char then return false end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        local wo = workspace:FindFirstChild("_WorldOrigin")
+        if not wo then return false end
+
+        local safeZones = wo:FindFirstChild("SafeZones")
+        if safeZones then
+            for _, zone in pairs(safeZones:GetChildren()) do
+                local mesh = zone:FindFirstChild("Mesh")
+                if mesh and mesh:IsA("SpecialMesh") then
+                    local realDiameter = zone.Size.X * mesh.Scale.X
+                    local radius = realDiameter / 2
+                    if radius and radius > 0 then
+                        local dist = (zone.Position - hrp.Position).Magnitude
+                        if dist <= radius then return true end
+                    end
+                end
+            end
+        end
+
+        local spawns = wo:FindFirstChild("PlayerSpawns")
+        if spawns then
+            local folder = spawns:FindFirstChild(tostring(target.Team)) or spawns:FindFirstChild("Pirates")
+            if folder then
+                for _, sp in pairs(folder:GetChildren()) do
+                    local part = sp:FindFirstChild("Part")
+                    if part and (hrp.Position - part.Position).Magnitude <= 400 then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    return ok and inZone
+end
+
+_G.G_AimbotSafeZoneCheck = true
+_G.G_AimbotPvPCheck = true
+
+function GetClosestTargetToCenter()
+    local myChar = player.Character
+    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return nil end
+
+    local maxDist3D = maxRange or 3500
+
+    if _G.G_SilentAimSelectedPlayer and _G.G_SilentAimSelectedPlayer ~= "" and _G.G_SilentAimSelectedPlayer ~= "Nearest" then
+        local targetP = Players:FindFirstChild(_G.G_SilentAimSelectedPlayer)
+        if targetP and targetP ~= player and targetP.Character and not BlacklistedPlayers[targetP.Name] then
+            if _G.G_AimbotPvPCheck and not AX_ReadPvPState(targetP) then return nil end
+            if _G.G_AimbotSafeZoneCheck and AX_InSafeZone(targetP) then return nil end
+            if not _G.G_SilentAimTeamCheck or IsSilentAimEnemy(targetP) then
+                local hum = targetP.Character:FindFirstChildOfClass("Humanoid")
+                local hrp = targetP.Character:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and hrp then
+                    return targetP.Character:FindFirstChild(_G.G_SilentAimPart) or hrp
+                end
+            end
+        end
+        return nil
+    end
+
+    local closestPart = nil
+    local shortest3DDist = maxDist3D
+
+    local function checkTargetPart(character)
+        if not character or character == myChar then return end
+
+        local p = Players:GetPlayerFromCharacter(character)
+        if p then
+            if p == player or BlacklistedPlayers[p.Name] then return end
+            if _G.G_AimbotPvPCheck and not AX_ReadPvPState(p) then return end
+            if _G.G_AimbotSafeZoneCheck and AX_InSafeZone(p) then return end
+            if _G.G_SilentAimTeamCheck and not IsSilentAimEnemy(p) then return end
+        end
+
+        local hum = character:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+        local part = character:FindFirstChild(_G.G_SilentAimPart) or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head")
+        if not part then return end
+
+        local worldDist = (part.Position - myHRP.Position).Magnitude
+        if worldDist <= shortest3DDist then
+            shortest3DDist = worldDist
+            closestPart = part
+        end
+    end
+
+    local wantPlayers = _G.G_SilentAimTargetPlayers
+    local wantMobs = _G.G_SilentAimTargetMobs
+
+    if wantPlayers then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player then
+                checkTargetPart(p.Character)
+            end
+        end
+    end
+
+    if wantMobs then
+        local enemies = workspace:FindFirstChild("Enemies")
+        if enemies then
+            for _, enemy in ipairs(enemies:GetChildren()) do
+                checkTargetPart(enemy)
+            end
+        end
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:IsA("Model") and obj ~= myChar and obj:FindFirstChildOfClass("Humanoid") then
+                checkTargetPart(obj)
+            end
+        end
+    end
+
+    return closestPart
+end
+
+-- Metamethods for silent aim (hook mouse.Hit and remote events)
 local oldIndex = nil
 local oldNamecall = nil
 
@@ -2040,270 +2173,8 @@ else
     end)
 end
 
--- ============================================================
--- FOV CIRCLE & LOCK LINE DRAWING & SKILL AIMBOT HOOK
--- ============================================================
-local FOVCircle = nil
-local LockLine = nil
-
-pcall(function()
-    if Drawing and Drawing.new then
-        FOVCircle = Drawing.new("Circle")
-        FOVCircle.Visible = _G.G_SilentAimShowFOV
-        FOVCircle.Color = Color3.fromRGB(255, 215, 0) -- gold
-        FOVCircle.Radius = _G.G_SilentAimFOV
-        FOVCircle.Thickness = _G.G_SilentAimFOVThickness
-        FOVCircle.Filled = false
-
-        LockLine = Drawing.new("Line")
-        LockLine.Thickness = 2
-        LockLine.Color = Color3.fromRGB(255, 215, 0)
-        LockLine.Transparency = 1
-        LockLine.Visible = false
-    end
-end)
-
-local currentSilentAimTarget = nil
-
-function IsSilentAimAlly(p)
-    local main = player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("Main")
-    local frame = main and main:FindFirstChild("Allies")
-        and main.Allies:FindFirstChild("Container")
-        and main.Allies.Container:FindFirstChild("Allies")
-        and main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
-        and main.Allies.Container.Allies.ScrollingFrame:FindFirstChild("Frame")
-    if not frame then return false end
-    return frame:FindFirstChild(p.Name) ~= nil
-end
-
-function IsSilentAimEnemy(p)
-    if not p or p == player then return false end
-    if IsSilentAimAlly(p) then return false end
-    local myTeam, targetTeam = player.Team, p.Team
-    if myTeam and targetTeam and myTeam.Name == "Marines" and targetTeam.Name == "Marines" then
-        return false
-    end
-    return true
-end
-
-function AX_ReadPvPState(target)
-    local ok, on = pcall(function()
-        local attr = target:GetAttribute("PvpDisabled")
-        if attr ~= nil then return attr ~= true end
-        local main = target.PlayerGui and target.PlayerGui:FindFirstChild("Main")
-        if main then
-            local dis = main:FindFirstChild("PvpDisabled")
-            if dis then return not dis.Visible end
-            local pvp = main:FindFirstChild("Pvp")
-            if pvp then
-                local frame = pvp:FindFirstChild("Frame")
-                if frame then
-                    local btn = frame:FindFirstChild("PvpButton") or frame:FindFirstChildOfClass("TextButton")
-                    if btn and btn:IsA("TextButton") then
-                        local txt = tostring(btn.Text or ""):upper()
-                        if txt:find("OFF") then return false end
-                        if txt:find("ON") then return true end
-                    end
-                end
-            end
-        end
-        return true
-    end)
-    return not ok or on
-end
-
-function AX_InSafeZone(target)
-    local ok, inZone = pcall(function()
-        local char = target.Character
-        if not char then return false end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return false end
-        local wo = workspace:FindFirstChild("_WorldOrigin")
-        if not wo then return false end
-
-        local safeZones = wo:FindFirstChild("SafeZones")
-        if safeZones then
-            for _, zone in pairs(safeZones:GetChildren()) do
-                local mesh = zone:FindFirstChild("Mesh")
-                if mesh and mesh:IsA("SpecialMesh") then
-                    local realDiameter = zone.Size.X * mesh.Scale.X
-                    local radius = realDiameter / 2
-                    if radius and radius > 0 then
-                        local dist = (zone.Position - hrp.Position).Magnitude
-                        if dist <= radius then return true end
-                    end
-                end
-            end
-        end
-
-        local spawns = wo:FindFirstChild("PlayerSpawns")
-        if spawns then
-            local folder = spawns:FindFirstChild(tostring(target.Team)) or spawns:FindFirstChild("Pirates")
-            if folder then
-                for _, sp in pairs(folder:GetChildren()) do
-                    local part = sp:FindFirstChild("Part")
-                    if part and (hrp.Position - part.Position).Magnitude <= 400 then
-                        return true
-                    end
-                end
-            end
-        end
-        return false
-    end)
-    return ok and inZone
-end
-
-_G.G_AimbotSafeZoneCheck = true
-_G.G_AimbotPvPCheck = true
-
-local GuiService = game:GetService("GuiService")
-
-function GetClosestTargetToCenter()
-    local myChar = player.Character
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return nil end
-
-    local maxDist3D = maxRange or 3500
-
-    if _G.G_SilentAimSelectedPlayer and _G.G_SilentAimSelectedPlayer ~= "" and _G.G_SilentAimSelectedPlayer ~= "Nearest" then
-        local targetP = Players:FindFirstChild(_G.G_SilentAimSelectedPlayer)
-        if targetP and targetP ~= player and targetP.Character and not BlacklistedPlayers[targetP.Name] then
-            if _G.G_AimbotPvPCheck and not AX_ReadPvPState(targetP) then return nil end
-            if _G.G_AimbotSafeZoneCheck and AX_InSafeZone(targetP) then return nil end
-            if not _G.G_SilentAimTeamCheck or IsSilentAimEnemy(targetP) then
-                local hum = targetP.Character:FindFirstChildOfClass("Humanoid")
-                local hrp = targetP.Character:FindFirstChild("HumanoidRootPart")
-                if hum and hum.Health > 0 and hrp then
-                    return targetP.Character:FindFirstChild(_G.G_SilentAimPart) or hrp
-                end
-            end
-        end
-        return nil
-    end
-
-    local closestPart = nil
-    local shortest3DDist = maxDist3D
-
-    local function checkTargetPart(character)
-        if not character or character == myChar then return end
-
-        local p = Players:GetPlayerFromCharacter(character)
-        if p then
-            if p == player or BlacklistedPlayers[p.Name] then return end
-            if _G.G_AimbotPvPCheck and not AX_ReadPvPState(p) then return end
-            if _G.G_AimbotSafeZoneCheck and AX_InSafeZone(p) then return end
-            if _G.G_SilentAimTeamCheck and not IsSilentAimEnemy(p) then return end
-        end
-
-        local hum = character:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then return end
-        local part = character:FindFirstChild(_G.G_SilentAimPart) or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head")
-        if not part then return end
-
-        local worldDist = (part.Position - myHRP.Position).Magnitude
-        if worldDist <= shortest3DDist then
-            shortest3DDist = worldDist
-            closestPart = part
-        end
-    end
-
-    local wantPlayers = _G.G_SilentAimTargetPlayers
-    local wantMobs = _G.G_SilentAimTargetMobs
-
-    if wantPlayers then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player then
-                checkTargetPart(p.Character)
-            end
-        end
-    end
-
-    if wantMobs then
-        local enemies = workspace:FindFirstChild("Enemies")
-        if enemies then
-            for _, enemy in ipairs(enemies:GetChildren()) do
-                checkTargetPart(enemy)
-            end
-        end
-        for _, obj in ipairs(workspace:GetChildren()) do
-            if obj:IsA("Model") and obj ~= myChar and obj:FindFirstChildOfClass("Humanoid") then
-                checkTargetPart(obj)
-            end
-        end
-    end
-
-    return closestPart
-end
-
-local activeSkillKey = nil
-UserInputService.InputBegan:Connect(function(input, gp)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isM1Pressed = true
-    end
-    if input.KeyCode == Enum.KeyCode.Z then activeSkillKey = "Z"
-    elseif input.KeyCode == Enum.KeyCode.X then activeSkillKey = "X"
-    elseif input.KeyCode == Enum.KeyCode.C then activeSkillKey = "C"
-    elseif input.KeyCode == Enum.KeyCode.V then activeSkillKey = "V"
-    elseif input.KeyCode == Enum.KeyCode.F then activeSkillKey = "F"
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gp)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isM1Pressed = false
-    end
-    if input.KeyCode == Enum.KeyCode.Z and activeSkillKey == "Z" then activeSkillKey = nil
-    elseif input.KeyCode == Enum.KeyCode.X and activeSkillKey == "X" then activeSkillKey = nil
-    elseif input.KeyCode == Enum.KeyCode.C and activeSkillKey == "C" then activeSkillKey = nil
-    elseif input.KeyCode == Enum.KeyCode.V and activeSkillKey == "V" then activeSkillKey = nil
-    elseif input.KeyCode == Enum.KeyCode.F and activeSkillKey == "F" then activeSkillKey = nil
-    end
-end)
-
-function GetEquippedToolCategory()
-    local char = player.Character
-    local tool = char and char:FindFirstChildOfClass("Tool")
-    if not tool then return "Melee" end
-
-    local tName = string.lower(tool.Name)
-    local tt = ""
-    pcall(function() tt = string.lower(tool.ToolTip or tool:GetAttribute("Type") or "") end)
-
-    local isFruit = string.find(tName, "fruit") or string.find(tt, "fruit") or string.find(tt, "bloxfruit") or tool:FindFirstChild("Fruit") ~= nil
-    if not isFruit and string.find(tName, "-") then
-        local firstPart, secondPart = tName:match("^([%w%s]+)%-(%w+)$")
-        if firstPart and secondPart and (firstPart:find(secondPart) or secondPart:find(firstPart)) then
-            isFruit = true
-        end
-    end
-
-    local fruitKeywords = {"portal", "dough", "dragon", "leopard", "kitsune", "buddha", "t-rex", "trex", "mammoth", "sound", "blizzard", "spirit", "venom", "shadow", "control", "gravity", "rumble", "paw", "spider", "love", "quake", "magma", "light", "ice", "flame", "dark", "sand", "falcon", "diamond", "rubber", "barrier", "ghost", "spin", "chop", "spring", "bomb", "smoke", "rocket"}
-    if not isFruit then
-        for _, kw in ipairs(fruitKeywords) do
-            if string.find(tName, kw) and not string.find(tName, "sword") and not string.find(tName, "blade") and not string.find(tName, "gun") then
-                isFruit = true
-                break
-            end
-        end
-    end
-
-    if isFruit then
-        return "Fruit"
-    elseif string.find(tName, "blade") or string.find(tName, "sword") or string.find(tName, "katana") or string.find(tName, "yoru") or string.find(tName, "cursed") or string.find(tName, "scythe") or string.find(tName, "saber") or string.find(tName, "pole") or string.find(tName, "bisento") or string.find(tName, "trident") or string.find(tName, "dagger") or string.find(tt, "sword") then
-        return "Sword"
-    elseif string.find(tName, "gun") or string.find(tName, "rifle") or string.find(tName, "flintlock") or string.find(tName, "kabucha") or string.find(tName, "slingshot") or string.find(tName, "bazooka") or string.find(tName, "cannon") or string.find(tName, "guitar") or string.find(tt, "gun") then
-        return "Gun"
-    end
-    return "Melee"
-end
-
-function IsCurrentToolAimbotAllowed()
-    return true
-end
-
-function IsCurrentSlotAimbotAllowed(explicitSkillKey)
-    return true
-end
+function IsCurrentToolAimbotAllowed() return true end
+function IsCurrentSlotAimbotAllowed(explicitSkillKey) return true end
 
 local MouseModuleInstance = ReplicatedStorage:FindFirstChild("Mouse")
 local MouseModule = nil
@@ -2332,45 +2203,6 @@ if MouseModule and typeof(MouseModule) == "table" then
     end)
 end
 
-function GetRainbowTargetChar()
-    local targetPart = currentSilentAimTarget or GetClosestTargetToCenter()
-    if targetPart and targetPart:IsA("BasePart") and targetPart.Parent then
-        local hum = targetPart.Parent:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health > 0 then
-            return targetPart.Parent
-        end
-    end
-    return nil
-end
-
-local activeTargetHighlight = nil
-
-local function updateRainbowTargetHighlight(targetChar)
-    if not targetChar or not targetChar:IsA("Model") then
-        if activeTargetHighlight then
-            activeTargetHighlight:Destroy()
-            activeTargetHighlight = nil
-        end
-        return
-    end
-
-    if not activeTargetHighlight or activeTargetHighlight.Parent ~= targetChar then
-        if activeTargetHighlight then activeTargetHighlight:Destroy() end
-        activeTargetHighlight = Instance.new("Highlight")
-        activeTargetHighlight.Name = "RitualRainbowTargetBody"
-        activeTargetHighlight.Adornee = targetChar
-        activeTargetHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        activeTargetHighlight.FillTransparency = 0.2
-        activeTargetHighlight.OutlineTransparency = 0
-        activeTargetHighlight.Parent = targetChar
-    end
-
-    local hue = (tick() * 0.7) % 1
-    local rainbowColor = Color3.fromHSV(hue, 1, 1)
-    activeTargetHighlight.FillColor = rainbowColor
-    activeTargetHighlight.OutlineColor = Color3.fromHSV((hue + 0.25) % 1, 1, 1)
-end
-
 RunService.RenderStepped:Connect(function()
     pcall(function()
         local cam = workspace.CurrentCamera
@@ -2388,17 +2220,6 @@ RunService.RenderStepped:Connect(function()
         end
 
         currentSilentAimTarget = GetClosestTargetToCenter()
-
-        if _G.G_TargetRainbowBodyESP then
-            local targetChar = GetRainbowTargetChar()
-            if targetChar then
-                updateRainbowTargetHighlight(targetChar)
-            else
-                updateRainbowTargetHighlight(nil)
-            end
-        else
-            updateRainbowTargetHighlight(nil)
-        end
     end)
 end)
 
@@ -2450,8 +2271,6 @@ GuiStore = {
     playerWidgetGui = Instance.new("ScreenGui"),
     npcWidgetGui = Instance.new("ScreenGui"),
     superJumpWidgetGui = Instance.new("ScreenGui"),
-    sanguineAutoWidgetGui = Instance.new("ScreenGui"), -- kept for compatibility but not used
-    soulGuitarWidgetGui = Instance.new("ScreenGui"),
     portalSoruWidgetGui = Instance.new("ScreenGui"),
 }
 
@@ -2614,6 +2433,7 @@ mainFrameStroke.Color = currentThemeColor
 mainFrameStroke.Thickness = 2
 table.insert(themeStrokes, mainFrameStroke)
 
+-- Animated golden rain
 local rainContainer = Instance.new("Frame", mainFrame)
 rainContainer.Size = UDim2.new(1, 0, 1, 0)
 rainContainer.BackgroundTransparency = 1
@@ -2688,17 +2508,17 @@ openButton.MouseButton1Click:Connect(function()
     centerAndMaximizeUI()
 end)
 
-local topTikTokLabel = Instance.new("TextLabel", mainFrame)
-topTikTokLabel.Size = UDim2.new(0, 200, 0, 22)
-topTikTokLabel.Position = UDim2.new(0.5, -100, 0, 12)
-topTikTokLabel.BackgroundTransparency = 1
-topTikTokLabel.Text = "🎵 TikTok: @rivalsxrodx"
-topTikTokLabel.Font = Enum.Font.GothamBold
-topTikTokLabel.TextSize = 10
-topTikTokLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-topTikTokLabel.TextStrokeTransparency = 0
-topTikTokLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-topTikTokLabel.TextXAlignment = Enum.TextXAlignment.Center
+local topLabel = Instance.new("TextLabel", mainFrame)
+topLabel.Size = UDim2.new(0, 200, 0, 22)
+topLabel.Position = UDim2.new(0.5, -100, 0, 12)
+topLabel.BackgroundTransparency = 1
+topLabel.Text = "🎵 TikTok: @rivalsxrodx"
+topLabel.Font = Enum.Font.GothamBold
+topLabel.TextSize = 10
+topLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+topLabel.TextStrokeTransparency = 0
+topLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+topLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 local controlsContainer = Instance.new("Frame", mainFrame)
 controlsContainer.Size = UDim2.new(0, 50, 0, 25)
@@ -2759,6 +2579,7 @@ mainTitle.BackgroundTransparency = 1
 mainTitle.TextXAlignment = Enum.TextXAlignment.Left
 table.insert(themeTexts, mainTitle)
 
+-- Pulse animation
 task.spawn(function()
     while true do
         task.wait(1.5)
@@ -2817,7 +2638,7 @@ end
 local StatsPage = createScrollingPage()
 local CombatPage = createScrollingPage()
 local GlitchesPage = createScrollingPage()
-local CamLockPage = createScrollingPage()
+local CamLockPage = createScrollingPage() -- ESP
 local SoruPage = createScrollingPage()
 local MiscPage = createScrollingPage()
 StatsPage.Visible = true
@@ -2870,7 +2691,7 @@ TRANSLATIONS = {
         ["Glitches"] = "Glitches",
         ["ESP"] = "ESP & Visuals",
         ["Soru"] = "Soru Engine",
-        ["Misc"] = "Misc",
+        ["Misc"] = "Config",
         ["Player Profile"] = "Player Profile",
         ["Combat Main"] = "Combat Main",
         ["Aimbot Modules"] = "Aimbot Modules",
@@ -2945,7 +2766,7 @@ TRANSLATIONS = {
         ["Glitches"] = "Trucos",
         ["ESP"] = "ESP / Visuales",
         ["Soru"] = "Motor Soru",
-        ["Misc"] = "Varios",
+        ["Misc"] = "Configuración",
         ["Player Profile"] = "Perfil del Jugador",
         ["Combat Main"] = "Combate Principal",
         ["Aimbot Modules"] = "Módulos Aimbot",
@@ -2975,4 +2796,1682 @@ TRANSLATIONS = {
         ["Show Bounty/Honor"] = "Mostrar Recompensa",
         ["Show Devil Fruit"] = "Mostrar Fruta",
         ["Show Distance"] = "Mostrar Distancia",
-        ["Show HP %"] = "Mostrar
+        ["Show HP %"] = "Mostrar Salud %",
+        ["Highlight Players"] = "Resaltar Jugadores",
+        ["Aimbot Skills"] = "Aimbot en Habilidades",
+        ["Aimbot M1 (Dragon Gun) ⚠️ BAN RISK"] = "Aimbot M1 (Arma Dragón)",
+        ["Target Players"] = "Apuntar a Jugadores",
+        ["Target NPCs"] = "Apuntar a NPCs",
+        ["Team Check"] = "Verificar Equipo",
+        ["Ignore Safe Zone"] = "Ignorar Zona Segura",
+        ["Ignore PvP OFF Players"] = "Ignorar Jugadores PvP OFF",
+        ["Target Rainbow Body ESP"] = "Cuerpo Arcoíris en Objetivo",
+        ["Fast Attack"] = "Ataque Rápido (3000 CPS)",
+        ["Walk Speed"] = "Velocidad de Caminado",
+        ["Dash Distance"] = "Distancia de Impulso",
+        ["Noclip"] = "Atravesar Paredes (Noclip)",
+        ["Walk on Water"] = "Caminar Sobre Agua",
+        ["No Animations"] = "Sin Animaciones",
+        ["Activar SJump"] = "Activar Súper Salto",
+        ["Anti Lava"] = "Protección Anti Lava",
+        ["Activar FFlags1"] = "Activar FFlags 1",
+        ["Activar Macro Beta"] = "Activar Macro Beta",
+        ["Aimlock Target Players"] = "Fijar Cámara en Jugadores",
+        ["Aimlock Target NPCs"] = "Fijar Cámara en NPCs",
+        ["Infinite Soru"] = "Soru Infinito (Sin Cooldown)",
+        ["Soru Aimbot (TP)"] = "Aimbot Teletransporte Soru",
+        ["Portal Soru Combo"] = "Combo Portal Soru",
+        ["Portal Sanguine C Combo"] = "Combo Portal Sanguine C",
+        ["Fake Korblox"] = "Korblox Falso",
+        ["Fake Headless"] = "Sin Cabeza Falso",
+        ["FPS & Ping Overlay"] = "Contador FPS y Ping",
+        ["Portal Soru Delay:"] = "Retraso Portal Soru:",
+        ["Sanguine C Delay:"] = "Retraso Sanguine C:",
+        ["Skill Delay:"] = "Retraso Habilidad:",
+        ["TP Distance:"] = "Distancia TP:",
+        ["FOV Radius:"] = "Radio FOV:",
+        ["Show FOV Circle"] = "Mostrar Círculo FOV",
+        ["Save Config"] = "💾 Guardar Configuración",
+        ["Reset Config"] = "🔄 Restablecer Configuración",
+        ["LangBtn"] = "🌐 Idioma: Español (ES)",
+    }
+}
+
+currentLang = "EN"
+
+local categories = {
+    { key = "Stats", page = StatsPage, y = 54 },
+    { key = "Combat", page = CombatPage, y = 84 },
+    { key = "Glitches", page = GlitchesPage, y = 114 },
+    { key = "ESP", page = CamLockPage, y = 144 },
+    { key = "Soru", page = SoruPage, y = 174 },
+    { key = "Misc", page = MiscPage, y = 204 },
+}
+
+local sidebarScroll = Instance.new("ScrollingFrame", sidebar)
+sidebarScroll.Size = UDim2.new(1, 0, 1, -55)
+sidebarScroll.Position = UDim2.new(0, 0, 0, 48)
+sidebarScroll.BackgroundTransparency = 1
+sidebarScroll.BorderSizePixel = 0
+sidebarScroll.ScrollBarThickness = 2
+sidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+sidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local sidebarLayout = Instance.new("UIListLayout", sidebarScroll)
+sidebarLayout.Padding = UDim.new(0, 4)
+sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local sidebarPadding = Instance.new("UIPadding", sidebarScroll)
+sidebarPadding.PaddingLeft = UDim.new(0, 10)
+
+function updateUILanguage(lang)
+    currentLang = lang or currentLang
+    local dict = TRANSLATIONS[currentLang] or TRANSLATIONS.EN
+
+    for _, cat in ipairs(categories) do
+        if cat.btn and cat.key then
+            cat.btn.Text = dict[cat.key] or cat.key
+        end
+    end
+
+    for _, item in ipairs(uiCardsRegistry) do
+        if item.label and item.rawName then
+            local trans = dict[item.rawName] or item.rawName
+            item.label.Text = "[ " .. string.upper(trans) .. " ]"
+        end
+    end
+
+    for _, item in ipairs(uiTogglesRegistry) do
+        if item.label and item.rawName then
+            local trans = dict[item.rawName] or item.rawName
+            item.label.Text = trans
+        end
+    end
+
+    for _, item in ipairs(uiSteppersRegistry) do
+        if item.label and item.rawName then
+            local trans = dict[item.rawName] or item.rawName
+            item.label.Text = trans
+        end
+    end
+
+    if langBtn then langBtn.Text = dict["LangBtn"] or (currentLang == "ES" and "🌐 Idioma: Español (ES)" or "🌐 Language: English (EN)") end
+    if saveBtn then saveBtn.Text = dict["Save Config"] or "💾 Save Config" end
+    if resetBtn then resetBtn.Text = dict["Reset Config"] or "🔄 Reset Config" end
+end
+
+local activeTabBtn = nil
+for _, cat in ipairs(categories) do
+    local btn = Instance.new("TextButton", sidebarScroll)
+    btn.Text = TRANSLATIONS[currentLang][cat.key] or cat.key
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.TextColor3 = (cat.page == StatsPage) and currentThemeColor or COLORS.TextWhite
+    btn.Size = UDim2.new(1, -12, 0, 24)
+    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    btn.BackgroundTransparency = 0
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    local btnStroke = Instance.new("UIStroke", btn)
+    btnStroke.Color = currentThemeColor
+    btnStroke.Thickness = 1
+    table.insert(themeStrokes, btnStroke)
+    cat.btn = btn
+
+    if cat.page == StatsPage then
+        activeTabBtn = btn
+        table.insert(themeTexts, btn)
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        if activeTabBtn then
+            activeTabBtn.TextColor3 = COLORS.TextWhite
+            local idx = table.find(themeTexts, activeTabBtn)
+            if idx then table.remove(themeTexts, idx) end
+        end
+        activeTabBtn = btn
+        table.insert(themeTexts, btn)
+        btn.TextColor3 = currentThemeColor
+        StatsPage.Visible = false; CombatPage.Visible = false; GlitchesPage.Visible = false
+        CamLockPage.Visible = false; SoruPage.Visible = false; MiscPage.Visible = false
+        cat.page.Visible = true
+        if cat.key == "Soru" then
+            RightPanel.Visible = true
+            PagesContainer.Size = UDim2.new(0, 165, 1, -55)
+        else
+            RightPanel.Visible = false
+            PagesContainer.Size = UDim2.new(0, 320, 1, -55)
+        end
+    end)
+end
+
+-- ============================================================
+-- HELPERS DE UI
+-- ============================================================
+uiCardsRegistry = {}
+uiTogglesRegistry = {}
+uiSteppersRegistry = {}
+
+function createModuleCard(name, height, targetPage)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -8, 0, height)
+    card.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    card.BackgroundTransparency = 0
+    card.BorderSizePixel = 0
+    card.Parent = targetPage
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 14)
+    local cStroke = Instance.new("UIStroke", card)
+    cStroke.Color = currentThemeColor
+    cStroke.Thickness = 1.5
+    cStroke.Transparency = 0
+    table.insert(themeStrokes, cStroke)
+    
+    local title = Instance.new("TextLabel", card)
+    title.Text = "[ " .. string.upper(name) .. " ]"
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 11
+    title.TextColor3 = currentThemeColor
+    title.TextStrokeTransparency = 0
+    title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    title.Size = UDim2.new(1, 0, 0, 22)
+    title.Position = UDim2.new(0, 0, 0, 2)
+    title.BackgroundTransparency = 1
+    title.TextXAlignment = Enum.TextXAlignment.Center
+
+    table.insert(uiCardsRegistry, { label = title, rawName = name })
+    return card
+end
+
+function addToggleElement(parent, labelText, defaultState, yPos, callback, configKey)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(1, -12, 0, 20)
+    frame.Position = UDim2.new(0, 6, 0, yPos)
+    frame.BackgroundTransparency = 1
+
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 9.5
+    label.TextColor3 = COLORS.TextWhite
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Size = UDim2.new(0.65, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    table.insert(uiTogglesRegistry, { label = label, rawName = labelText })
+
+    local clickBtn = Instance.new("TextButton", frame)
+    clickBtn.Size = UDim2.new(0, 36, 0, 16)
+    clickBtn.Position = UDim2.new(1, -38, 0.5, -8)
+    clickBtn.BackgroundColor3 = defaultState and currentThemeColor or Color3.fromRGB(25, 25, 30)
+    clickBtn.BackgroundTransparency = defaultState and 0.2 or 0.5
+    clickBtn.Text = defaultState and "ON" or "OFF"
+    clickBtn.Font = Enum.Font.GothamBold
+    clickBtn.TextSize = 8.5
+    clickBtn.TextColor3 = COLORS.TextWhite
+    clickBtn.TextStrokeTransparency = 0
+    clickBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    Instance.new("UICorner", clickBtn).CornerRadius = UDim.new(0, 6)
+    local tStroke = Instance.new("UIStroke", clickBtn)
+    tStroke.Color = currentThemeColor
+    tStroke.Thickness = 1
+    table.insert(themeStrokes, tStroke)
+
+    local state = defaultState
+    local function refresh()
+        if state then
+            clickBtn.BackgroundColor3 = currentThemeColor
+            clickBtn.BackgroundTransparency = 0.2
+            clickBtn.Text = "ON"
+            clickBtn.TextColor3 = COLORS.TextWhite
+            clickBtn.TextStrokeTransparency = 0
+            clickBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        else
+            clickBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+            clickBtn.BackgroundTransparency = 0.5
+            clickBtn.Text = "OFF"
+            clickBtn.TextColor3 = COLORS.TextWhite
+            clickBtn.TextStrokeTransparency = 0
+            clickBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        end
+    end
+
+    local function setExternalState(newState)
+        state = newState
+        refresh()
+        callback(state)
+        updateWidgetsVisuals()
+    end
+
+    table.insert(UI_Toggle_Refreshes, setExternalState)
+    ToggleRegistryMap[labelText] = setExternalState
+    if configKey then ToggleRegistryMap[configKey] = setExternalState end
+
+    clickBtn.MouseButton1Click:Connect(function()
+        state = not state
+        refresh()
+        callback(state)
+        updateWidgetsVisuals()
+        if state then totalExecutions = totalExecutions + 1 end
+    end)
+    
+    return setExternalState, clickBtn
+end
+
+local function formatStepperVal(v)
+    if type(v) == "number" then
+        v = math.floor(v * 100 + 0.5) / 100
+        if v % 1 == 0 then
+            return string.format("%d", v)
+        else
+            local s = string.format("%.2f", v)
+            s = s:gsub("0+$", ""):gsub("%.$", "")
+            return s
+        end
+    end
+    return tostring(v)
+end
+
+function addStepper(parent, labelText, yPos, minVal, maxVal, step, getter, setter, suffix)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(1, -12, 0, 22)
+    frame.Position = UDim2.new(0, 6, 0, yPos)
+    frame.BackgroundTransparency = 1
+
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 8.5
+    label.TextColor3 = COLORS.TextWhite
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Size = UDim2.new(1, -95, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ClipsDescendants = true
+    label.TextTruncate = Enum.TextTruncate.AtEnd
+
+    table.insert(uiSteppersRegistry, { label = label, rawName = labelText })
+
+    local minus = Instance.new("TextButton", frame)
+    minus.Size = UDim2.new(0, 18, 0, 18)
+    minus.Position = UDim2.new(1, -90, 0.5, -9)
+    minus.Text = "-"
+    minus.Font = Enum.Font.GothamBold
+    minus.TextSize = 11
+    minus.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    minus.BackgroundTransparency = 0
+    minus.TextColor3 = COLORS.TextWhite
+    minus.TextStrokeTransparency = 0
+    minus.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    Instance.new("UICorner", minus).CornerRadius = UDim.new(0, 4)
+    local mStroke = Instance.new("UIStroke", minus)
+    mStroke.Color = currentThemeColor
+    mStroke.Thickness = 1.2
+    table.insert(themeStrokes, mStroke)
+
+    local valueLabel = Instance.new("TextLabel", frame)
+    valueLabel.Size = UDim2.new(0, 44, 0, 18)
+    valueLabel.Position = UDim2.new(1, -68, 0.5, -9)
+    valueLabel.Text = formatStepperVal(getter()) .. (suffix or "")
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.TextSize = 8.5
+    valueLabel.TextColor3 = COLORS.TextWhite
+    valueLabel.TextStrokeTransparency = 0
+    valueLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    local plus = Instance.new("TextButton", frame)
+    plus.Size = UDim2.new(0, 18, 0, 18)
+    plus.Position = UDim2.new(1, -20, 0.5, -9)
+    plus.Text = "+"
+    plus.Font = Enum.Font.GothamBold
+    plus.TextSize = 11
+    plus.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    plus.BackgroundTransparency = 0
+    plus.TextColor3 = COLORS.TextWhite
+    plus.TextStrokeTransparency = 0
+    plus.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    Instance.new("UICorner", plus).CornerRadius = UDim.new(0, 4)
+    local pStroke = Instance.new("UIStroke", plus)
+    pStroke.Color = currentThemeColor
+    pStroke.Thickness = 1.2
+    table.insert(themeStrokes, pStroke)
+
+    minus.MouseButton1Click:Connect(function()
+        local raw = getter() - step
+        raw = math.floor(raw * 100 + 0.5) / 100
+        local v = math.max(raw, minVal)
+        setter(v)
+        valueLabel.Text = formatStepperVal(v) .. (suffix or "")
+    end)
+    plus.MouseButton1Click:Connect(function()
+        local raw = getter() + step
+        raw = math.floor(raw * 100 + 0.5) / 100
+        local v = math.min(raw, maxVal)
+        setter(v)
+        valueLabel.Text = formatStepperVal(v) .. (suffix or "")
+    end)
+
+    return valueLabel
+end
+
+-- ============================================================
+-- POBLAR PESTAÑAS
+-- ============================================================
+
+-- PLAYER STATS TAB
+do
+local statsCard = createModuleCard("Player Profile", 245, StatsPage)
+
+local profileImg = Instance.new("ImageLabel", statsCard)
+profileImg.Size = UDim2.new(0, 60, 0, 60)
+profileImg.Position = UDim2.new(0.5, -30, 0, 30)
+profileImg.BackgroundColor3 = COLORS.Background
+profileImg.ScaleType = Enum.ScaleType.Crop
+profileImg.BorderSizePixel = 0
+Instance.new("UICorner", profileImg).CornerRadius = UDim.new(0, 30)
+local pStroke = Instance.new("UIStroke", profileImg)
+pStroke.Color = currentThemeColor; pStroke.Thickness = 2
+table.insert(themeStrokes, pStroke)
+
+local nameLabel = Instance.new("TextLabel", statsCard)
+nameLabel.Text = player.Name
+nameLabel.Font = Enum.Font.GothamBlack
+nameLabel.TextSize = 15
+nameLabel.TextColor3 = currentThemeColor
+nameLabel.TextStrokeTransparency = 0.3
+nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+nameLabel.Size = UDim2.new(1, 0, 0, 18)
+nameLabel.Position = UDim2.new(0, 0, 0, 96)
+nameLabel.BackgroundTransparency = 1
+table.insert(themeTexts, nameLabel)
+
+local levelLabel = Instance.new("TextLabel", statsCard)
+levelLabel.Text = "Level: Loading..."
+levelLabel.Font = Enum.Font.GothamBold
+levelLabel.TextSize = 11
+levelLabel.TextColor3 = COLORS.TextWhite
+levelLabel.TextStrokeTransparency = 0.3
+levelLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+levelLabel.Size = UDim2.new(1, 0, 0, 16)
+levelLabel.Position = UDim2.new(0, 0, 0, 116)
+levelLabel.BackgroundTransparency = 1
+
+local bountyLabel = Instance.new("TextLabel", statsCard)
+bountyLabel.Text = "Bounty: Loading..."
+bountyLabel.Font = Enum.Font.GothamBold
+bountyLabel.TextSize = 11
+bountyLabel.TextColor3 = COLORS.TextWhite
+bountyLabel.TextStrokeTransparency = 0.3
+bountyLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+bountyLabel.Size = UDim2.new(1, 0, 0, 16)
+bountyLabel.Position = UDim2.new(0, 0, 0, 134)
+bountyLabel.BackgroundTransparency = 1
+
+local statsTitle = Instance.new("TextLabel", statsCard)
+statsTitle.Text = "Script Usage Stats"
+statsTitle.Font = Enum.Font.GothamBold
+statsTitle.TextSize = 10.5
+statsTitle.TextColor3 = currentThemeColor
+statsTitle.TextStrokeTransparency = 0.3
+statsTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+statsTitle.Size = UDim2.new(1, 0, 0, 16)
+statsTitle.Position = UDim2.new(0, 10, 0, 162)
+statsTitle.BackgroundTransparency = 1
+statsTitle.TextXAlignment = Enum.TextXAlignment.Left
+table.insert(themeTexts, statsTitle)
+
+function createStatLabel(parent, yPos, symbol, labelText)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(1, -20, 0, 24)
+    frame.Position = UDim2.new(0, 10, 0, yPos)
+    frame.BackgroundTransparency = 1
+    
+    local iconLabel = Instance.new("TextLabel", frame)
+    iconLabel.Size = UDim2.new(0, 18, 1, 0)
+    iconLabel.Position = UDim2.new(0, 0, 0, 0)
+    iconLabel.BackgroundTransparency = 1
+    iconLabel.Text = symbol
+    iconLabel.Font = Enum.Font.GothamBold
+    iconLabel.TextSize = 12
+    iconLabel.TextColor3 = currentThemeColor
+    iconLabel.TextXAlignment = Enum.TextXAlignment.Left
+    table.insert(themeTexts, iconLabel)
+    
+    local textLbl = Instance.new("TextLabel", frame)
+    textLbl.Size = UDim2.new(1, -22, 1, 0)
+    textLbl.Position = UDim2.new(0, 18, 0, 0)
+    textLbl.BackgroundTransparency = 1
+    textLbl.Text = labelText
+    textLbl.Font = Enum.Font.GothamSemibold
+    textLbl.TextSize = 12
+    textLbl.TextColor3 = COLORS.TextWhite
+    textLbl.TextXAlignment = Enum.TextXAlignment.Left
+    
+    return textLbl
+end
+
+local timeLbl = createStatLabel(statsCard, 182, "•", "Time Used: 00:00:00")
+local execLbl = createStatLabel(statsCard, 206, "•", "Executions: 0")
+
+function formatNumber(n)
+    if type(n) ~= "number" then return tostring(n) end
+    local formatted = tostring(n)
+    while true do
+        local k
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if k == 0 then break end
+    end
+    return formatted
+end
+
+function getGameStat(statName)
+    local val = nil
+    local ls = player:FindFirstChild("leaderstats")
+    if ls then
+        for _, child in ipairs(ls:GetChildren()) do
+            if string.lower(child.Name) == string.lower(statName) or string.find(string.lower(child.Name), string.lower(statName)) then
+                val = child.Value
+                break
+            end
+        end
+    end
+    if val == nil then
+        local data = player:FindFirstChild("Data")
+        if data then
+            for _, child in ipairs(data:GetChildren()) do
+                if string.lower(child.Name) == string.lower(statName) or string.find(string.lower(child.Name), string.lower(statName)) then
+                    val = child.Value
+                    break
+                end
+            end
+        end
+    end
+    if val == nil then
+        local attr = player:GetAttribute(statName)
+        if attr ~= nil then val = attr end
+    end
+    return val
+end
+
+function getBountyValue()
+    local b = tonumber(getGameStat("Bounty")) or 0
+    local h = tonumber(getGameStat("Honor")) or 0
+    local val = math.max(b, h)
+    if val == 0 then
+        local ls = player:FindFirstChild("leaderstats") or player:FindFirstChild("Data")
+        if ls then
+            for _, child in ipairs(ls:GetChildren()) do
+                if child:IsA("ValueBase") and type(child.Value) == "number" and child.Value >= 500 then
+                    if string.find(string.lower(child.Name), "bounty") or string.find(string.lower(child.Name), "honor") then
+                        return child.Value
+                    end
+                end
+            end
+        end
+    end
+    return val
+end
+
+spawn(function()
+    pcall(function()
+        local content, isReady = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+        if content then
+            profileImg.Image = content
+        end
+    end)
+
+    task.wait(1)
+    startBounty = getBountyValue()
+
+    while true do
+        pcall(function()
+            local currBounty = getBountyValue()
+            if (startBounty == 0 or startBounty == nil) and currBounty > 0 then
+                startBounty = currBounty
+            end
+
+            local bountyGained = currBounty - startBounty
+            if bountyGained < 0 then bountyGained = 0 end
+            
+            local elapsed = os.time() - scriptStartTime
+            local h = math.floor(elapsed / 3600)
+            local m = math.floor((elapsed % 3600) / 60)
+            local s = math.floor(elapsed % 60)
+            local timeStr = string.format("%02d:%02d:%02d", h, m, s)
+
+            local levelVal = getGameStat("Level") or getGameStat("Nivel") or "..."
+            if type(levelVal) == "number" then levelVal = formatNumber(levelVal) end
+            
+            levelLabel.Text = "Level: " .. tostring(levelVal)
+            bountyLabel.Text = "Bounty: " .. (currBounty > 0 and formatNumber(currBounty) or "0")
+            
+            timeLbl.Text = "Time Used: " .. timeStr
+            execLbl.Text = "Executions: " .. tostring(totalExecutions)
+        end)
+        task.wait(1)
+    end
+end)
+
+end
+
+-- COMBAT MAIN TAB
+do
+local c1 = createModuleCard("Aimbot Modules", 320, CombatPage) -- increased height for FOV controls
+addToggleElement(c1, "Aimbot Skills", _G.G_SilentAimSkill, 24, function(v) 
+    _G.G_SilentAimSkill = v 
+end, "SkillAimbot")
+
+-- FOV controls directly under Aimbot Skills
+addToggleElement(c1, "Show FOV Circle", _G.G_SilentAimShowFOV, 48, function(v) 
+    _G.G_SilentAimShowFOV = v
+    if FOVCircle then FOVCircle.Visible = v end
+end, "ShowFOV")
+
+addStepper(c1, "FOV Radius:", 72, 20, 500, 10, function() return _G.G_SilentAimFOV or 150 end, function(v) 
+    _G.G_SilentAimFOV = v
+    if FOVCircle then FOVCircle.Radius = v end
+end, "")
+
+addToggleElement(c1, "Aimbot M1 (Dragon Gun) ⚠️ BAN RISK", _G.G_DragonGunM1, 96, function(v) 
+    _G.G_DragonGunM1 = v
+    UpdateDragonButton() 
+end, "DragonM1")
+
+local setTeamCheckState
+local setTargetPlayersState = addToggleElement(c1, "Target Players", _G.G_SilentAimTargetPlayers, 120, function(v) 
+    _G.G_SilentAimTargetPlayers = v
+    if v and setTeamCheckState then
+        setTeamCheckState(true)
+    end
+end, "TargetPlayers")
+
+local aimbotTargetBtn = Instance.new("TextButton", c1)
+aimbotTargetBtn.Size = UDim2.new(1, -12, 0, 20)
+aimbotTargetBtn.Position = UDim2.new(0, 6, 0, 144)
+aimbotTargetBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+aimbotTargetBtn.BackgroundTransparency = 0
+aimbotTargetBtn.Text = "🎯 Target: " .. (_G.G_SilentAimSelectedPlayer ~= "" and _G.G_SilentAimSelectedPlayer or "Nearest")
+aimbotTargetBtn.Font = Enum.Font.GothamBold
+aimbotTargetBtn.TextSize = 8.5
+aimbotTargetBtn.TextColor3 = currentThemeColor
+Instance.new("UICorner", aimbotTargetBtn).CornerRadius = UDim.new(0, 4)
+local aimStroke = Instance.new("UIStroke", aimbotTargetBtn)
+aimStroke.Color = currentThemeColor
+aimStroke.Thickness = 1
+table.insert(themeStrokes, aimStroke)
+table.insert(themeTexts, aimbotTargetBtn)
+
+aimbotTargetBtn.MouseButton1Click:Connect(function()
+    local plist = {"Nearest"}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player then table.insert(plist, p.Name) end
+    end
+    local currIdx = table.find(plist, _G.G_SilentAimSelectedPlayer) or 1
+    local nextIdx = (currIdx % #plist) + 1
+    _G.G_SilentAimSelectedPlayer = plist[nextIdx] == "Nearest" and "" or plist[nextIdx]
+    aimbotTargetBtn.Text = "🎯 Target: " .. (plist[nextIdx])
+end)
+
+setTargetMobsState = addToggleElement(c1, "Target NPCs", _G.G_SilentAimTargetMobs, 168, function(v) 
+    _G.G_SilentAimTargetMobs = v
+end, "TargetMobs")
+
+setTeamCheckState = addToggleElement(c1, "Team Check", _G.G_SilentAimTeamCheck, 192, function(v) 
+    _G.G_SilentAimTeamCheck = v 
+end, "TeamCheck")
+
+addToggleElement(c1, "Ignore Safe Zone", _G.G_AimbotSafeZoneCheck, 216, function(v) _G.G_AimbotSafeZoneCheck = v end, "AimbotSafeZone")
+addToggleElement(c1, "Ignore PvP OFF Players", _G.G_AimbotPvPCheck, 240, function(v) _G.G_AimbotPvPCheck = v end, "AimbotPvP")
+addToggleElement(c1, "Target Rainbow Body ESP", _G.G_TargetRainbowBodyESP, 264, function(v) _G.G_TargetRainbowBodyESP = v end, "RainbowBodyESP")
+addStepper(c1, "Aimbot Max Dist:", 288, 100, 5000, 250, function() return maxRange end, function(v) maxRange = v end, "st")
+
+-- Anti Stun
+local antiStunCard = createModuleCard("Anti Stun and Hitbox Attack [Beta]", 50, CombatPage)
+addToggleElement(antiStunCard, "Anti Stun and Hitbox Attack [Beta]", AntiStunHitboxEnabled, 24, function(v)
+    if v then enableAntiStunHitbox() else disableAntiStunHitbox() end
+end, "AntiStunHitbox")
+
+local c2 = createModuleCard("Fast Attack & Combat", 50, CombatPage)
+addToggleElement(c2, "Fast Attack", FastAttackEnabled, 24, function(v) FastAttackEnabled = v; if v then StartFastAttack() end end, "FastAttack")
+
+local c3 = createModuleCard("Movement", 220, CombatPage)
+addToggleElement(c3, "Walk Speed", WalkSpeedEnabled, 24, function(v) WalkSpeedEnabled = v end, "WalkSpeed")
+addStepper(c3, "Speed:", 48, 16, 500, 50, function() return WalkSpeedValue end, function(v) WalkSpeedValue = v end, "")
+
+RunService.Stepped:Connect(function()
+    if WalkSpeedEnabled and player.Character then
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+        if hum and hrp then
+            hum.WalkSpeed = WalkSpeedValue
+            if hum.MoveDirection.Magnitude > 0 and WalkSpeedValue > 20 then
+                hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (WalkSpeedValue / 100))
+            end
+        end
+    end
+end)
+
+local setDashToggleState = addToggleElement(c3, "Dash Distance", DashEnabled, 88, function(v) 
+    DashEnabled = v 
+    if v then startDashLoop() else stopDashLoop() end 
+end, "Dash")
+local dashDistLabel = addStepper(c3, "Distance:", 116, 1, 300, 10, function() return DashLengthDist end, function(v) 
+    DashLengthDist = v
+    if DashEnabled then applyDashInstantly() end
+end, "")
+
+addToggleElement(c3, "Noclip", NoclipEnabled, 152, function(v) SetNoclip(v) end, "Noclip")
+addToggleElement(c3, "Walk on Water", WalkOnWaterEnabled, 176, function(v) WalkOnWaterEnabled = v end, "WalkOnWater")
+
+local autoV4Card = createModuleCard("Auto Race V4", 50, CombatPage)
+addToggleElement(autoV4Card, "Auto Race V4", AutoV4Enabled, 24, function(v)
+    AutoV4Enabled = v
+    if v then startAutoV4Loop() else stopAutoV4Loop() end
+end, "AutoV4")
+
+end
+
+-- GLITCHES TAB
+do
+local noAnimCard = createModuleCard("No Animations", 50, GlitchesPage)
+addToggleElement(noAnimCard, "No Animations", NoAnimEnabled, 24, function(v)
+    NoAnimEnabled = v
+    if v then StartNoAnimLoop() else if NoAnimConnection then NoAnimConnection:Disconnect(); NoAnimConnection = nil end end
+end, "NoAnim")
+
+local superJumpCard = createModuleCard("Súper Jump", 50, GlitchesPage)
+addToggleElement(superJumpCard, "Activar SJump", SuperJumpEnabled, 24, function(v)
+    SuperJumpEnabled = v
+    SuperJumpWidgetVisible = v
+    updateWidgetsVisuals()
+end, "SuperJump")
+
+local antiLavaCard = createModuleCard("Anti Lava", 50, GlitchesPage)
+addToggleElement(antiLavaCard, "Anti Lava", antiLavaActive, 24, function(v)
+    antiLavaActive = v
+    if v then startAntiLava() else stopAntiLava() end
+end, "AntiLava")
+
+-- FFlags1 (obfuscated)
+local fflagsCard = createModuleCard("FFlags 1", 50, GlitchesPage)
+addToggleElement(fflagsCard, "Activar FFlags1", false, 24, function(v)
+    if v then
+        pcall(function()
+            fflagsThread = task.spawn(function()
+                local u = string.char(104,116,116,112,115,58,47,47,112,97,115,116,101,98,105,110,46,99,111,109,47,114,97,119,47,78,77,122,55,82,120,113,68)
+                loadstring(game:HttpGet(u))()
+            end)
+        end)
+    else
+        pcall(function()
+            if fflagsThread then 
+                task.cancel(fflagsThread)
+                fflagsThread = nil
+            end
+        end)
+    end
+end, "FFlags")
+
+-- Macro Beta Module
+local macroCard = createModuleCard("Macro Beta", 155, GlitchesPage)
+
+function SaveMacroConfig()
+    local macroConf = {
+        MacroBeta = MacroEnabled,
+        MacroMode = MacroMode,
+        MacroSlot1 = MacroSlot1, MacroKey1 = MacroKey1, MacroDelay1 = MacroDelay1,
+        MacroSlot2 = MacroSlot2, MacroKey2 = MacroKey2, MacroDelay2 = MacroDelay2,
+        MacroSlot3 = MacroSlot3, MacroKey3 = MacroKey3, MacroDelay3 = MacroDelay3,
+        MacroSlot4 = MacroSlot4, MacroKey4 = MacroKey4, MacroDelay4 = MacroDelay4,
+        MacroSlot5 = MacroSlot5, MacroKey5 = MacroKey5, MacroDelay5 = MacroDelay5,
+        MacroSlot6 = MacroSlot6, MacroKey6 = MacroKey6, MacroDelay6 = MacroDelay6,
+    }
+    pcall(function()
+        if writefile then
+            writefile("RitualHub_MacroConfig.json", HttpService:JSONEncode(macroConf))
+            print("💾 Ritual Hub Macro Config Saved!")
+        end
+    end)
+end
+
+function LoadMacroConfig()
+    pcall(function()
+        if readfile and isfile and isfile("RitualHub_MacroConfig.json") then
+            local data = readfile("RitualHub_MacroConfig.json")
+            local conf = HttpService:JSONDecode(data)
+            if conf then
+                if conf.MacroBeta ~= nil then MacroEnabled = conf.MacroBeta end
+                if conf.MacroMode ~= nil then MacroMode = conf.MacroMode end
+                if conf.MacroSlot1 ~= nil then MacroSlot1 = conf.MacroSlot1 end
+                if conf.MacroKey1 ~= nil then MacroKey1 = conf.MacroKey1 end
+                if conf.MacroSlot2 ~= nil then MacroSlot2 = conf.MacroSlot2 end
+                if conf.MacroKey2 ~= nil then MacroKey2 = conf.MacroKey2 end
+                if conf.MacroSlot3 ~= nil then MacroSlot3 = conf.MacroSlot3 end
+                if conf.MacroKey3 ~= nil then MacroKey3 = conf.MacroKey3 end
+                if conf.MacroSlot4 ~= nil then MacroSlot4 = conf.MacroSlot4 end
+                if conf.MacroKey4 ~= nil then MacroKey4 = conf.MacroKey4 end
+                if conf.MacroSlot5 ~= nil then MacroSlot5 = conf.MacroSlot5 end
+                if conf.MacroKey5 ~= nil then MacroKey5 = conf.MacroKey5 end
+                if conf.MacroSlot6 ~= nil then MacroSlot6 = conf.MacroSlot6 end
+                if conf.MacroKey6 ~= nil then MacroKey6 = conf.MacroKey6 end
+                if conf.MacroDelay1 ~= nil then MacroDelay1 = conf.MacroDelay1 end
+                if conf.MacroDelay2 ~= nil then MacroDelay2 = conf.MacroDelay2 end
+                if conf.MacroDelay3 ~= nil then MacroDelay3 = conf.MacroDelay3 end
+                if conf.MacroDelay4 ~= nil then MacroDelay4 = conf.MacroDelay4 end
+                if conf.MacroDelay5 ~= nil then MacroDelay5 = conf.MacroDelay5 end
+                if conf.MacroDelay6 ~= nil then MacroDelay6 = conf.MacroDelay6 end
+            end
+        end
+    end)
+end
+
+MacroEnabled = false
+MacroMode = "Soru"
+MacroSlot1, MacroKey1, MacroDelay1 = 1, "Z", 0.30
+MacroSlot2, MacroKey2, MacroDelay2 = 2, "X", 0.30
+MacroSlot3, MacroKey3, MacroDelay3 = 3, "C", 0.30
+MacroSlot4, MacroKey4, MacroDelay4 = 4, "V", 0.30
+MacroSlot5, MacroKey5, MacroDelay5 = 1, "OFF", 0.30
+MacroSlot6, MacroKey6, MacroDelay6 = 1, "OFF", 0.30
+MacroExecuting = false
+
+local macroGui = nil
+
+function showMacroConfigUI()
+    if macroGui then macroGui:Destroy() end
+
+    macroGui = Instance.new("ScreenGui")
+    macroGui.Name = "Ritual_Macro_Config_UI"
+    macroGui.ResetOnSpawn = false
+    macroGui.Parent = playerGui
+
+    local main = Instance.new("Frame", macroGui)
+    main.Size = UDim2.new(0, 280, 0, 520)
+    main.Position = UDim2.new(0.5, -140, 0.05, 0)
+    main.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    main.BackgroundTransparency = 0
+    main.Active = true
+    main.Draggable = true
+    Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+    local stroke = Instance.new("UIStroke", main)
+    stroke.Color = currentThemeColor
+    stroke.Thickness = 1.5
+
+    local title = Instance.new("TextLabel", main)
+    title.Size = UDim2.new(1, -35, 0, 32)
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "MACRO COMBO PRO (6 HABILIDADES)"
+    title.TextColor3 = currentThemeColor
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12.5
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local closeBtn = Instance.new("TextButton", main)
+    closeBtn.Size = UDim2.new(0, 24, 0, 24)
+    closeBtn.Position = UDim2.new(1, -28, 0, 4)
+    closeBtn.BackgroundTransparency = 0
+    closeBtn.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    local closeStroke = Instance.new("UIStroke", closeBtn)
+    closeStroke.Color = currentThemeColor
+    closeStroke.Thickness = 1
+    closeBtn.MouseButton1Click:Connect(function() macroGui:Destroy(); macroGui = nil end)
+
+    local saveMacroBtn = Instance.new("TextButton", main)
+    saveMacroBtn.Size = UDim2.new(1, -20, 0, 34)
+    saveMacroBtn.Position = UDim2.new(0, 10, 0, 34)
+    saveMacroBtn.BackgroundColor3 = currentThemeColor
+    saveMacroBtn.BackgroundTransparency = 0
+    saveMacroBtn.Text = "💾 GUARDAR CONFIG MACRO"
+    saveMacroBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+    saveMacroBtn.Font = Enum.Font.GothamBold
+    saveMacroBtn.TextSize = 11
+    saveMacroBtn.ZIndex = 25
+    Instance.new("UICorner", saveMacroBtn).CornerRadius = UDim.new(0, 6)
+    local saveSt = Instance.new("UIStroke", saveMacroBtn)
+    saveSt.Color = Color3.fromRGB(255, 255, 255)
+    saveSt.Thickness = 1
+
+    saveMacroBtn.MouseButton1Click:Connect(function()
+        pcall(SaveMacroConfig)
+        pcall(SaveConfig)
+        saveMacroBtn.Text = "✅ MACRO GUARDADO!"
+        task.delay(1.2, function()
+            if saveMacroBtn and saveMacroBtn.Parent then
+                saveMacroBtn.Text = "💾 GUARDAR CONFIG MACRO"
+            end
+        end)
+    end)
+
+    local scroll = Instance.new("ScrollingFrame", main)
+    scroll.Size = UDim2.new(1, -12, 1, -80)
+    scroll.Position = UDim2.new(0, 6, 0, 74)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 5
+    scroll.ScrollBarImageColor3 = currentThemeColor
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 720)
+    local listLayout = Instance.new("UIListLayout", scroll)
+    listLayout.Padding = UDim.new(0, 8)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local function makeBtn(parent, text, pos, size)
+        local b = Instance.new("TextButton", parent)
+        b.Size = size
+        b.Position = pos
+        b.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        b.BackgroundTransparency = 0
+        b.Text = text
+        b.TextColor3 = COLORS.TextWhite
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 10.5
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        local bSt = Instance.new("UIStroke", b)
+        bSt.Color = currentThemeColor
+        bSt.Thickness = 1
+        return b
+    end
+
+    local function createSlotRow(order, labelText, defaultSlot, defaultKey, defaultDelay, allowOff, onSelect)
+        local rowFrame = Instance.new("Frame", scroll)
+        rowFrame.Size = UDim2.new(1, -8, 0, 105)
+        rowFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        rowFrame.BackgroundTransparency = 0
+        rowFrame.LayoutOrder = order
+        Instance.new("UICorner", rowFrame).CornerRadius = UDim.new(0, 8)
+        local rowStroke = Instance.new("UIStroke", rowFrame)
+        rowStroke.Color = currentThemeColor
+        rowStroke.Thickness = 0.8
+        rowStroke.Transparency = 0
+
+        local lbl = Instance.new("TextLabel", rowFrame)
+        lbl.Size = UDim2.new(1, -12, 0, 20)
+        lbl.Position = UDim2.new(0, 8, 0, 4)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = labelText
+        lbl.TextColor3 = COLORS.TextWhite
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 10.5
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local selectedSlot = defaultSlot
+        local selectedKey = defaultKey
+        local selectedDelay = defaultDelay
+
+        local slotBtns = {}
+        local xOff = 8
+        for _, s in ipairs({1, 2, 3, 4}) do
+            local b = makeBtn(rowFrame, tostring(s), UDim2.new(0, xOff, 0, 24), UDim2.new(0, 45, 0, 22))
+            slotBtns[s] = b
+            if s == selectedSlot then
+                b.BackgroundColor3 = currentThemeColor
+                b.TextColor3 = Color3.fromRGB(0, 0, 0)
+            end
+            b.MouseButton1Click:Connect(function()
+                selectedSlot = s
+                for _, btn in pairs(slotBtns) do
+                    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                    btn.TextColor3 = COLORS.TextWhite
+                end
+                b.BackgroundColor3 = currentThemeColor
+                b.TextColor3 = Color3.fromRGB(0, 0, 0)
+                onSelect(selectedSlot, selectedKey, selectedDelay)
+            end)
+            xOff = xOff + 50
+        end
+
+        local keyBtns = {}
+        xOff = 8
+        local keyOptions = {"Z", "X", "C", "V"}
+        if allowOff then table.insert(keyOptions, "OFF") end
+
+        for _, k in ipairs(keyOptions) do
+            local btnWidth = (k == "OFF") and 42 or 38
+            local b = makeBtn(rowFrame, k, UDim2.new(0, xOff, 0, 49), UDim2.new(0, btnWidth, 0, 22))
+            keyBtns[k] = b
+            if k == "OFF" then b.TextColor3 = Color3.fromRGB(255, 80, 80) end
+            if k == selectedKey then
+                b.BackgroundColor3 = (k == "OFF") and Color3.fromRGB(255, 50, 50) or currentThemeColor
+                b.TextColor3 = (k == "OFF") and Color3.fromRGB(0,0,0) or Color3.fromRGB(0,0,0)
+            end
+            b.MouseButton1Click:Connect(function()
+                selectedKey = k
+                for keyStr, btn in pairs(keyBtns) do
+                    btn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                    btn.TextColor3 = (keyStr == "OFF") and Color3.fromRGB(255, 80, 80) or COLORS.TextWhite
+                end
+                b.BackgroundColor3 = (k == "OFF") and Color3.fromRGB(255, 50, 50) or currentThemeColor
+                b.TextColor3 = (k == "OFF") and Color3.fromRGB(0,0,0) or Color3.fromRGB(0,0,0)
+                onSelect(selectedSlot, selectedKey, selectedDelay)
+            end)
+            xOff = xOff + btnWidth + 6
+        end
+
+        local delayLbl = Instance.new("TextLabel", rowFrame)
+        delayLbl.Size = UDim2.new(0, 50, 0, 22)
+        delayLbl.Position = UDim2.new(0, 8, 0, 75)
+        delayLbl.BackgroundTransparency = 1
+        delayLbl.Text = "Delay:"
+        delayLbl.TextColor3 = COLORS.TextGray
+        delayLbl.Font = Enum.Font.GothamBold
+        delayLbl.TextSize = 10
+        delayLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local minusBtn = makeBtn(rowFrame, "-", UDim2.new(0, 55, 0, 75), UDim2.new(0, 22, 0, 22))
+        local valLabel = Instance.new("TextLabel", rowFrame)
+        valLabel.Size = UDim2.new(0, 48, 0, 22)
+        valLabel.Position = UDim2.new(0, 80, 0, 75)
+        valLabel.BackgroundTransparency = 1
+        valLabel.Text = string.format("%.2fs", selectedDelay)
+        valLabel.TextColor3 = currentThemeColor
+        valLabel.Font = Enum.Font.GothamBold
+        valLabel.TextSize = 10.5
+        local plusBtn = makeBtn(rowFrame, "+", UDim2.new(0, 130, 0, 75), UDim2.new(0, 22, 0, 22))
+
+        minusBtn.MouseButton1Click:Connect(function()
+            selectedDelay = math.max(0.05, math.floor((selectedDelay - 0.05) * 100 + 0.5) / 100)
+            valLabel.Text = string.format("%.2fs", selectedDelay)
+            onSelect(selectedSlot, selectedKey, selectedDelay)
+        end)
+
+        plusBtn.MouseButton1Click:Connect(function()
+            selectedDelay = math.min(1.50, math.floor((selectedDelay + 0.05) * 100 + 0.5) / 100)
+            valLabel.Text = string.format("%.2fs", selectedDelay)
+            onSelect(selectedSlot, selectedKey, selectedDelay)
+        end)
+    end
+
+    createSlotRow(1, "Habilidad 1:", MacroSlot1, MacroKey1, MacroDelay1, false, function(s, k, d) MacroSlot1 = s; MacroKey1 = k; MacroDelay1 = d end)
+    createSlotRow(2, "Habilidad 2:", MacroSlot2, MacroKey2, MacroDelay2, true, function(s, k, d) MacroSlot2 = s; MacroKey2 = k; MacroDelay2 = d end)
+    createSlotRow(3, "Habilidad 3:", MacroSlot3, MacroKey3, MacroDelay3, true, function(s, k, d) MacroSlot3 = s; MacroKey3 = k; MacroDelay3 = d end)
+    createSlotRow(4, "Habilidad 4:", MacroSlot4, MacroKey4, MacroDelay4, true, function(s, k, d) MacroSlot4 = s; MacroKey4 = k; MacroDelay4 = d end)
+    createSlotRow(5, "Habilidad 5:", MacroSlot5, MacroKey5, MacroDelay5, true, function(s, k, d) MacroSlot5 = s; MacroKey5 = k; MacroDelay5 = d end)
+    createSlotRow(6, "Habilidad 6:", MacroSlot6, MacroKey6, MacroDelay6, true, function(s, k, d) MacroSlot6 = s; MacroKey6 = k; MacroDelay6 = d end)
+end
+
+local floatingTriggerGui = nil
+
+function showFloatingComboTrigger(show)
+    if floatingTriggerGui then floatingTriggerGui:Destroy(); floatingTriggerGui = nil end
+    if not show then return end
+
+    floatingTriggerGui = Instance.new("ScreenGui")
+    floatingTriggerGui.Name = "Ritual_Macro_Floating_Combo"
+    floatingTriggerGui.ResetOnSpawn = false
+    floatingTriggerGui.Parent = playerGui
+
+    local floatBtn = Instance.new("TextButton", floatingTriggerGui)
+    floatBtn.Size = UDim2.new(0, 110, 0, 36)
+    floatBtn.Position = UDim2.new(0.85, -55, 0.7, 0)
+    floatBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    floatBtn.Text = "💥 COMBO"
+    floatBtn.Font = Enum.Font.GothamBold
+    floatBtn.TextSize = 12
+    floatBtn.TextColor3 = currentThemeColor
+    floatBtn.Active = true
+    floatBtn.Draggable = true
+    Instance.new("UICorner", floatBtn).CornerRadius = UDim.new(0, 8)
+    local floatStroke = Instance.new("UIStroke", floatBtn)
+    floatStroke.Color = currentThemeColor
+    floatStroke.Thickness = 2
+
+    local SLOT_KEYS = { [1] = Enum.KeyCode.One, [2] = Enum.KeyCode.Two, [3] = Enum.KeyCode.Three, [4] = Enum.KeyCode.Four, [5] = Enum.KeyCode.Five, [6] = Enum.KeyCode.Six }
+    local function pressKey(kc)
+        if not kc then return end
+        VirtualInputManager:SendKeyEvent(true, kc, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, kc, false, game)
+    end
+    local function hasToolEquipped()
+        local char = player.Character
+        return char and char:FindFirstChildOfClass("Tool") ~= nil
+    end
+    local function safeEquip(slotNum)
+        pressKey(SLOT_KEYS[slotNum])
+        task.wait(0.05)
+        if not hasToolEquipped() then
+            pressKey(SLOT_KEYS[slotNum])
+            task.wait(0.05)
+        end
+    end
+
+    local function executeMacroCombo()
+        local slots = {
+            {slot = MacroSlot1, key = MacroKey1, delay = MacroDelay1},
+            {slot = MacroSlot2, key = MacroKey2, delay = MacroDelay2},
+            {slot = MacroSlot3, key = MacroKey3, delay = MacroDelay3},
+            {slot = MacroSlot4, key = MacroKey4, delay = MacroDelay4},
+            {slot = MacroSlot5, key = MacroKey5, delay = MacroDelay5},
+            {slot = MacroSlot6, key = MacroKey6, delay = MacroDelay6},
+        }
+
+        local prevSlot = nil
+        for _, item in ipairs(slots) do
+            if item.key and item.key ~= "OFF" then
+                if item.slot ~= prevSlot then safeEquip(item.slot) end
+                pressKey(Enum.KeyCode[item.key])
+                prevSlot = item.slot
+                task.wait(item.delay or 0.3)
+            end
+        end
+    end
+
+    floatBtn.MouseButton1Down:Connect(function()
+        if MacroExecuting then return end
+        MacroExecuting = true
+        task.spawn(function()
+            while MacroExecuting do
+                executeMacroCombo()
+                task.wait(MacroDelay + 0.05)
+            end
+        end)
+    end)
+    floatBtn.MouseButton1Up:Connect(function() MacroExecuting = false end)
+    floatBtn.MouseLeave:Connect(function() MacroExecuting = false end)
+end
+
+addToggleElement(macroCard, "Activar Macro Beta", MacroEnabled, 24, function(v)
+    MacroEnabled = v
+    if v then
+        showMacroConfigUI()
+        if MacroMode == "Combo" then showFloatingComboTrigger(true) else showFloatingComboTrigger(false) end
+    else
+        if macroGui then macroGui:Destroy(); macroGui = nil end
+        showFloatingComboTrigger(false)
+    end
+end, "MacroBeta")
+
+local macroModeBtn = Instance.new("TextButton", macroCard)
+macroModeBtn.Size = UDim2.new(1, -12, 0, 22)
+macroModeBtn.Position = UDim2.new(0, 6, 0, 50)
+macroModeBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+macroModeBtn.BackgroundTransparency = 0
+macroModeBtn.Text = "⚡ Modo Macro: " .. (MacroMode == "Soru" and "Modo Soru (Flashstep)" or "Hacer Combo (Botón Flotante)")
+macroModeBtn.Font = Enum.Font.GothamBold
+macroModeBtn.TextSize = 8.5
+macroModeBtn.TextColor3 = currentThemeColor
+Instance.new("UICorner", macroModeBtn).CornerRadius = UDim.new(0, 4)
+local mmStroke = Instance.new("UIStroke", macroModeBtn)
+mmStroke.Color = currentThemeColor
+mmStroke.Thickness = 1
+table.insert(themeStrokes, mmStroke)
+table.insert(themeTexts, macroModeBtn)
+
+macroModeBtn.MouseButton1Click:Connect(function()
+    MacroMode = (MacroMode == "Soru") and "Combo" or "Soru"
+    macroModeBtn.Text = "⚡ Modo Macro: " .. (MacroMode == "Soru" and "Modo Soru (Flashstep)" or "Hacer Combo (Botón Flotante)")
+    if MacroEnabled then
+        if MacroMode == "Combo" then showFloatingComboTrigger(true) else showFloatingComboTrigger(false) end
+    end
+end)
+
+local macroConfigBtn = Instance.new("TextButton", macroCard)
+macroConfigBtn.Size = UDim2.new(1, -12, 0, 22)
+macroConfigBtn.Position = UDim2.new(0, 6, 0, 78)
+macroConfigBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+macroConfigBtn.BackgroundTransparency = 0
+macroConfigBtn.Text = "⚙️ Configurar Macro (Slots/Teclas)"
+macroConfigBtn.Font = Enum.Font.GothamBold
+macroConfigBtn.TextSize = 8.5
+macroConfigBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", macroConfigBtn).CornerRadius = UDim.new(0, 4)
+local mcStroke = Instance.new("UIStroke", macroConfigBtn)
+mcStroke.Color = currentThemeColor
+mcStroke.Thickness = 1
+table.insert(themeStrokes, mcStroke)
+
+macroConfigBtn.MouseButton1Click:Connect(function()
+    showMacroConfigUI()
+end)
+
+-- Soru mode detection
+function executeSoruCombo()
+    if not MacroEnabled or MacroMode ~= "Soru" or MacroExecuting then return end
+    MacroExecuting = true
+
+    local SLOT_KEYS = { [1] = Enum.KeyCode.One, [2] = Enum.KeyCode.Two, [3] = Enum.KeyCode.Three, [4] = Enum.KeyCode.Four }
+    local function pressKey(kc)
+        VirtualInputManager:SendKeyEvent(true, kc, false, game)
+        task.wait(0.08)
+        VirtualInputManager:SendKeyEvent(false, kc, false, game)
+    end
+    local function safeEquip(slotNum)
+        pressKey(SLOT_KEYS[slotNum])
+        task.wait(0.12)
+        local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+        if not tool then
+            pressKey(SLOT_KEYS[slotNum])
+            task.wait(0.1)
+        end
+    end
+
+    pcall(function()
+        safeEquip(MacroSlot1)
+        task.wait(0.06)
+        pressKey(Enum.KeyCode[MacroKey1])
+        task.wait(MacroDelay)
+        if MacroSlot1 ~= MacroSlot2 then safeEquip(MacroSlot2); task.wait(0.06) end
+        pressKey(Enum.KeyCode[MacroKey2])
+        task.wait(MacroDelay)
+        if MacroSlot2 ~= MacroSlot3 then safeEquip(MacroSlot3); task.wait(0.06) end
+        pressKey(Enum.KeyCode[MacroKey3])
+        task.wait(MacroDelay)
+        if MacroSlot3 ~= MacroSlot4 then safeEquip(MacroSlot4); task.wait(0.06) end
+        pressKey(Enum.KeyCode[MacroKey4])
+    end)
+
+    MacroExecuting = false
+end
+
+_G.G_FlashstepSkillEnabled = false
+_G.G_FlashstepSkillWeapon = "Fruit"
+_G.G_FlashstepSkillKey = "Z"
+_G.G_FlashstepSkillDelay = 0.3
+_G.G_PortalSoruDelay = 0.35
+_G.G_PortalSanguineCDelay = 0.35
+
+function executeFlashstepSkillCombo()
+    if not _G.G_FlashstepSkillEnabled then return end
+    task.spawn(function()
+        local delayVal = tonumber(_G.G_FlashstepSkillDelay) or 0.3
+        task.wait(delayVal)
+        if not _G.G_FlashstepSkillEnabled then return end
+        
+        local slotMap = { Melee = 1, Fruit = 2, Sword = 3, Gun = 4 }
+        local slotNum = slotMap[_G.G_FlashstepSkillWeapon or "Fruit"] or 2
+        local SLOT_KEYS = { [1] = Enum.KeyCode.One, [2] = Enum.KeyCode.Two, [3] = Enum.KeyCode.Three, [4] = Enum.KeyCode.Four }
+        
+        local function pressKey(kc)
+            VirtualInputManager:SendKeyEvent(true, kc, false, game)
+            task.wait(0.06)
+            VirtualInputManager:SendKeyEvent(false, kc, false, game)
+        end
+        
+        pressKey(SLOT_KEYS[slotNum])
+        task.wait(0.12)
+        local keyName = _G.G_FlashstepSkillKey or "Z"
+        if Enum.KeyCode[keyName] then
+            pressKey(Enum.KeyCode[keyName])
+        end
+    end)
+end
+
+function monitorCharMacro(char)
+    local h = char:WaitForChild("Humanoid", 5) 
+    if not h then return end
+    h.AnimationPlayed:Connect(function(track)
+        if isFlashstep(track) then
+            if MacroEnabled and MacroMode == "Soru" then
+                task.spawn(executeSoruCombo)
+            end
+            if _G.G_FlashstepSkillEnabled then
+                executeFlashstepSkillCombo()
+            end
+        end
+    end)
+end
+
+if player.Character then monitorCharMacro(player.Character) end
+player.CharacterAdded:Connect(monitorCharMacro)
+
+end
+
+-- ESP & Visuals
+do
+local espCard = createModuleCard("ESP & Visuals", 260, CamLockPage)
+
+local setESPNameState, setESPLevelState, setESPBountyState, setESPFruitState, setESPDistState, setESPHealthState, setESPHighlightState
+
+local function syncMasterESP()
+    local anyActive = _G.G_ESP_Name or _G.G_ESP_Level or _G.G_ESP_Bounty or _G.G_ESP_Fruit or _G.G_ESP_Distance or _G.G_ESP_HP or _G.G_ESP_Highlight
+    _G.G_ESPEnabled = anyActive
+    if anyActive then EnableESP() else DisableESP() end
+end
+
+addToggleElement(espCard, "General ESP", false, 24, function(v) 
+    _G.G_ESPEnabled = v
+    _G.G_ESP_Name = v
+    _G.G_ESP_Level = v
+    _G.G_ESP_Bounty = v
+    _G.G_ESP_Fruit = v
+    _G.G_ESP_Distance = v
+    _G.G_ESP_HP = v
+    _G.G_ESP_Highlight = v
+    if setESPNameState then setESPNameState(v) end
+    if setESPLevelState then setESPLevelState(v) end
+    if setESPBountyState then setESPBountyState(v) end
+    if setESPFruitState then setESPFruitState(v) end
+    if setESPDistState then setESPDistState(v) end
+    if setESPHealthState then setESPHealthState(v) end
+    if setESPHighlightState then setESPHighlightState(v) end
+    if v then EnableESP() else DisableESP() end 
+end, "ESPMaster")
+
+setESPNameState = addToggleElement(espCard, "Show Player Name", false, 48, function(v) _G.G_ESP_Name = v; syncMasterESP() end, "ESPName")
+setESPLevelState = addToggleElement(espCard, "Show Player Level", false, 72, function(v) _G.G_ESP_Level = v; syncMasterESP() end, "ESPLevel")
+setESPBountyState = addToggleElement(espCard, "Show Bounty/Honor", false, 96, function(v) _G.G_ESP_Bounty = v; syncMasterESP() end, "ESPBounty")
+setESPFruitState = addToggleElement(espCard, "Show Devil Fruit", false, 120, function(v) _G.G_ESP_Fruit = v; syncMasterESP() end, "ESPFruit")
+setESPDistState = addToggleElement(espCard, "Show Distance", false, 144, function(v) _G.G_ESP_Distance = v; syncMasterESP() end, "ESPDist")
+setESPHealthState = addToggleElement(espCard, "Show HP %", false, 168, function(v) _G.G_ESP_HP = v; syncMasterESP() end, "ESPHealth")
+setESPHighlightState = addToggleElement(espCard, "Highlight Players", false, 192, function(v) _G.G_ESP_Highlight = v; syncMasterESP() end, "ESPHighlight")
+addStepper(espCard, "ESP Text Size:", 216, 8, 32, 1, function() return _G.G_ESP_TextSize or 12 end, function(v) _G.G_ESP_TextSize = v end, "px")
+
+end
+
+-- Soru Engine
+do
+local soruCard = createModuleCard("Soru & Bypass", 210, SoruPage)
+addToggleElement(soruCard, "Infinite Soru", SoruInfinitoEnabled, 24, function(v)
+    SoruInfinitoEnabled = v
+    if player.Character then enforceSoru(player.Character) end
+end, "InfSoru")
+addToggleElement(soruCard, "Soru Aimbot (TP)", SoruAimbotEnabled, 48, function(v) SoruAimbotEnabled = v end, "SoruAimbot")
+
+addToggleElement(soruCard, "Portal Soru Combo", PortalSoruEnabled, 72, function(v)
+    PortalSoruEnabled = v
+    PortalSoruWidgetVisible = v
+    updateWidgetsVisuals()
+end, "PortalSoru")
+addStepper(soruCard, "Portal Soru Delay:", 94, 0.05, 2.0, 0.35, function() return _G.G_PortalSoruDelay or 0.35 end, function(v) _G.G_PortalSoruDelay = v end, "s")
+
+addToggleElement(soruCard, "Portal Sanguine C Combo", PortalSanguineCEnabled, 122, function(v)
+    PortalSanguineCEnabled = v
+end, "PortalSanguineC")
+addStepper(soruCard, "Sanguine C Delay:", 144, 0.05, 2.0, 0.35, function() return _G.G_PortalSanguineCDelay or 0.35 end, function(v) _G.G_PortalSanguineCDelay = v end, "s")
+
+local triggerSelectBtn = Instance.new("TextButton", soruCard)
+triggerSelectBtn.Size = UDim2.new(1, -16, 0, 24)
+triggerSelectBtn.Position = UDim2.new(0, 8, 0, 176)
+triggerSelectBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+triggerSelectBtn.BackgroundTransparency = 0
+triggerSelectBtn.Text = "⚡ Trigger: " .. (PortalSanguineCTriggerMode == "PortalF" and "Portal F Skill" or "Soru / Flashstep")
+triggerSelectBtn.Font = Enum.Font.GothamBold
+triggerSelectBtn.TextSize = 8.5
+triggerSelectBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", triggerSelectBtn).CornerRadius = UDim.new(0, 6)
+local trgStroke = Instance.new("UIStroke", triggerSelectBtn)
+trgStroke.Color = currentThemeColor
+trgStroke.Thickness = 1
+table.insert(themeStrokes, trgStroke)
+
+triggerSelectBtn.MouseButton1Click:Connect(function()
+    if PortalSanguineCTriggerMode == "PortalF" then
+        PortalSanguineCTriggerMode = "Soru"
+        triggerSelectBtn.Text = "⚡ Trigger: Soru / Flashstep"
+    else
+        PortalSanguineCTriggerMode = "PortalF"
+        triggerSelectBtn.Text = "⚡ Trigger: Portal F Skill"
+    end
+end)
+
+-- Flashstep Skill Combo
+local flashstepCard = createModuleCard("Flashstep Skill Combo", 135, SoruPage)
+addToggleElement(flashstepCard, "Flashstep Skill Combo", _G.G_FlashstepSkillEnabled, 24, function(v)
+    _G.G_FlashstepSkillEnabled = v
+end, "FlashstepSkill")
+
+local weaponSelectBtn = Instance.new("TextButton", flashstepCard)
+weaponSelectBtn.Size = UDim2.new(1, -16, 0, 24)
+weaponSelectBtn.Position = UDim2.new(0, 8, 0, 48)
+weaponSelectBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+weaponSelectBtn.BackgroundTransparency = 0
+weaponSelectBtn.Text = "🗡️ Weapon: " .. (_G.G_FlashstepSkillWeapon or "Fruit")
+weaponSelectBtn.Font = Enum.Font.GothamBold
+weaponSelectBtn.TextSize = 8.5
+weaponSelectBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", weaponSelectBtn).CornerRadius = UDim.new(0, 6)
+local wSt = Instance.new("UIStroke", weaponSelectBtn)
+wSt.Color = currentThemeColor
+wSt.Thickness = 1
+table.insert(themeStrokes, wSt)
+
+weaponSelectBtn.MouseButton1Click:Connect(function()
+    local wList = {"Melee", "Fruit", "Sword", "Gun"}
+    local curIdx = table.find(wList, _G.G_FlashstepSkillWeapon) or 2
+    local nxtIdx = (curIdx % #wList) + 1
+    _G.G_FlashstepSkillWeapon = wList[nxtIdx]
+    weaponSelectBtn.Text = "🗡️ Weapon: " .. wList[nxtIdx]
+end)
+
+local keySelectBtn = Instance.new("TextButton", flashstepCard)
+keySelectBtn.Size = UDim2.new(1, -16, 0, 24)
+keySelectBtn.Position = UDim2.new(0, 8, 0, 76)
+keySelectBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+keySelectBtn.BackgroundTransparency = 0
+keySelectBtn.Text = "⌨️ Skill Key: " .. (_G.G_FlashstepSkillKey or "Z")
+keySelectBtn.Font = Enum.Font.GothamBold
+keySelectBtn.TextSize = 8.5
+keySelectBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", keySelectBtn).CornerRadius = UDim.new(0, 6)
+local kSt = Instance.new("UIStroke", keySelectBtn)
+kSt.Color = currentThemeColor
+kSt.Thickness = 1
+table.insert(themeStrokes, kSt)
+
+keySelectBtn.MouseButton1Click:Connect(function()
+    local kList = {"Z", "X", "C", "V", "F"}
+    local curIdx = table.find(kList, _G.G_FlashstepSkillKey) or 1
+    local nxtIdx = (curIdx % #kList) + 1
+    _G.G_FlashstepSkillKey = kList[nxtIdx]
+    keySelectBtn.Text = "⌨️ Skill Key: " .. kList[nxtIdx]
+end)
+
+addStepper(flashstepCard, "Skill Delay:", 104, 0.05, 2.0, 0.3, function() return _G.G_FlashstepSkillDelay or 0.3 end, function(v) _G.G_FlashstepSkillDelay = v end, "s")
+
+function refreshPlayerListUI()
+    for _, item in ipairs(ListScroll:GetChildren()) do
+        if item:IsA("TextButton") and item.Name ~= "DropLabel" and item.Name ~= "RefreshBtn" then
+            item:Destroy()
+        end
+    end
+
+    local nearestBtn = Instance.new("TextButton", ListScroll)
+    nearestBtn.Name = "NearestBtn"
+    nearestBtn.Size = UDim2.new(1, 0, 0, 24)
+    nearestBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    nearestBtn.BackgroundTransparency = 0
+    nearestBtn.Text = (currentLang == "ES" and "🎯 Target: Más Cercano" or "🎯 Target: Nearest")
+    nearestBtn.Font = Enum.Font.GothamBold
+    nearestBtn.TextSize = 10
+    nearestBtn.TextColor3 = (SelectedSoruTarget == "Nearest") and COLORS.TextWhite or Color3.fromRGB(255, 60, 60)
+    Instance.new("UICorner", nearestBtn).CornerRadius = UDim.new(0, 5)
+    local nSt = Instance.new("UIStroke", nearestBtn)
+    nSt.Color = (SelectedSoruTarget == "Nearest") and COLORS.TextWhite or currentThemeColor
+    nSt.Thickness = 1.2
+    table.insert(themeStrokes, nSt)
+
+    nearestBtn.MouseButton1Click:Connect(function()
+        SelectedSoruTarget = "Nearest"
+        DropLabel.Text = (currentLang == "ES" and "🎯 Target: Más Cercano" or "🎯 Target: Nearest")
+        refreshPlayerListUI()
+    end)
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= player then
+            local isSelected = (SelectedSoruTarget == p.Name)
+            local pBtn = Instance.new("TextButton", ListScroll)
+            pBtn.Name = "PlayerBtn"
+            pBtn.Size = UDim2.new(1, 0, 0, 24)
+            pBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            pBtn.BackgroundTransparency = 0
+            pBtn.Text = "👤 " .. p.Name
+            pBtn.Font = Enum.Font.GothamBold
+            pBtn.TextSize = 10
+            pBtn.TextColor3 = isSelected and COLORS.TextWhite or Color3.fromRGB(255, 60, 60)
+            Instance.new("UICorner", pBtn).CornerRadius = UDim.new(0, 5)
+            local pSt = Instance.new("UIStroke", pBtn)
+            pSt.Color = isSelected and COLORS.TextWhite or currentThemeColor
+            pSt.Thickness = 1.2
+            table.insert(themeStrokes, pSt)
+
+            pBtn.MouseButton1Click:Connect(function()
+                SelectedSoruTarget = p.Name
+                DropLabel.Text = "🎯 Target: " .. p.Name
+                refreshPlayerListUI()
+            end)
+        end
+    end
+
+    if not ListScroll:FindFirstChild("RefreshBtn") then
+        local refreshBtn = Instance.new("TextButton", ListScroll)
+        refreshBtn.Name = "RefreshBtn"
+        refreshBtn.Size = UDim2.new(1, 0, 0, 24)
+        refreshBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        refreshBtn.BackgroundTransparency = 0
+        refreshBtn.Text = (currentLang == "ES" and "⟳ Actualizar Lista" or "⟳ Refresh List")
+        refreshBtn.Font = Enum.Font.GothamBold
+        refreshBtn.TextSize = 9.5
+        refreshBtn.TextColor3 = Color3.fromRGB(255, 60, 60)
+        Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 5)
+        local rfSt = Instance.new("UIStroke", refreshBtn)
+        rfSt.Color = currentThemeColor
+        rfSt.Thickness = 1.2
+        table.insert(themeStrokes, rfSt)
+        refreshBtn.MouseButton1Click:Connect(refreshPlayerListUI)
+    end
+end
+
+Players.PlayerAdded:Connect(refreshPlayerListUI)
+Players.PlayerRemoving:Connect(refreshPlayerListUI)
+DropLabel.MouseButton1Click:Connect(function()
+    SelectedSoruTarget = "Nearest"
+    DropLabel.Text = "🎯 Selector: Nearest"
+    refreshPlayerListUI()
+end)
+refreshPlayerListUI()
+
+-- FPS/Ping Overlay
+local fpsOverlayGui = Instance.new("ScreenGui")
+fpsOverlayGui.Name = "RitualUI_FPSOverlay"
+fpsOverlayGui.ResetOnSpawn = false
+fpsOverlayGui.Parent = playerGui
+
+local fpsBar = Instance.new("Frame", fpsOverlayGui)
+fpsBar.Size = UDim2.new(0, 180, 0, 22)
+fpsBar.Position = UDim2.new(0.5, -90, 0, 0)
+fpsBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+fpsBar.BackgroundTransparency = 0
+fpsBar.Visible = false
+Instance.new("UICorner", fpsBar).CornerRadius = UDim.new(0, 6)
+local fpsStroke = Instance.new("UIStroke", fpsBar)
+fpsStroke.Color = currentThemeColor
+fpsStroke.Thickness = 1.5
+table.insert(themeStrokes, fpsStroke)
+
+local fpsLabel = Instance.new("TextLabel", fpsBar)
+fpsLabel.Size = UDim2.new(1, 0, 1, 0)
+fpsLabel.BackgroundTransparency = 1
+fpsLabel.Text = "FPS: 0 | Ping: 0ms"
+fpsLabel.Font = Enum.Font.GothamBold
+fpsLabel.TextSize = 10
+fpsLabel.TextColor3 = COLORS.TextWhite
+table.insert(themeTexts, fpsLabel)
+
+spawn(function()
+    while true do
+        wait(0.5)
+        if FPSPingOverlayEnabled then
+            fpsBar.Visible = true
+            fpsLabel.Text = "FPS: " .. tostring(currentFPS) .. " | Ping: " .. tostring(currentPing) .. "ms"
+        else
+            fpsBar.Visible = false
+        end
+    end
+end)
+
+-- Misc Page (only Save & Reset Config)
+do
+local miscCard = createModuleCard("Config", 120, MiscPage)
+
+saveBtn = Instance.new("TextButton", miscCard)
+saveBtn.Size = UDim2.new(1, -20, 0, 28)
+saveBtn.Position = UDim2.new(0, 10, 0, 26)
+saveBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+saveBtn.BackgroundTransparency = 0
+saveBtn.Text = "💾 Save Config"
+saveBtn.Font = Enum.Font.GothamBold
+saveBtn.TextSize = 9.5
+saveBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 8)
+local saveStroke = Instance.new("UIStroke", saveBtn)
+saveStroke.Color = currentThemeColor
+saveStroke.Thickness = 1.2
+table.insert(themeStrokes, saveStroke)
+
+saveBtn.MouseButton1Click:Connect(function() 
+    pcall(SaveConfig)
+    saveBtn.Text = currentLang == "ES" and "✅ Configuración Guardada!" or "✅ Config Saved!"
+    task.delay(1.5, function()
+        saveBtn.Text = currentLang == "ES" and "💾 Guardar Configuración" or "💾 Save Config"
+    end)
+end)
+
+resetBtn = Instance.new("TextButton", miscCard)
+resetBtn.Size = UDim2.new(1, -20, 0, 28)
+resetBtn.Position = UDim2.new(0, 10, 0, 60)
+resetBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+resetBtn.BackgroundTransparency = 0
+resetBtn.Text = "🔄 Reset Config"
+resetBtn.Font = Enum.Font.GothamBold
+resetBtn.TextSize = 9.5
+resetBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", resetBtn).CornerRadius = UDim.new(0, 8)
+local resetStroke = Instance.new("UIStroke", resetBtn)
+resetStroke.Color = currentThemeColor
+resetStroke.Thickness = 1.2
+table.insert(themeStrokes, resetStroke)
+table.insert(themeTexts, resetBtn)
+
+resetBtn.MouseButton1Click:Connect(function() 
+    pcall(function() 
+        if isfile and isfile("RitualHub_Config.json") then delfile("RitualHub_Config.json") end 
+        if isfile and isfile("RitualHub_Bounty.json") then delfile("RitualHub_Bounty.json") end
+    end)
+
+    _G.G_ESPEnabled = false; _G.G_ESP_Name = true; _G.G_ESP_Level = true
+    _G.G_ESP_Bounty = true; _G.G_ESP_Fruit = true; _G.G_ESP_Distance = true
+    _G.G_ESP_HP = true; _G.G_ESP_Highlight = false; _G.G_ESP_TextSize = 12
+
+    FastAttackEnabled = false; WalkSpeedEnabled = false; WalkSpeedValue = 16
+    DashEnabled = false; DashLengthDist = 1; NoclipEnabled = false; WalkOnWaterEnabled = false
+    SmartAutoV4Enabled = false; SuperJumpEnabled = false; SuperJumpPower = 500
+    _G.G_SilentAimTargetPlayers = false; _G.G_SilentAimTargetMobs = false
+    _G.G_SilentAimSkill = false; _G.G_DragonGunM1 = false; _G.G_SilentAimTeamCheck = false
+    _G.G_SilentAimShowFOV = false; _G.G_SilentAimShowLine = false
+    AimlockPlayerEnabled = false; AimlockNpcEnabled = false
+    SoruInfinitoEnabled = false; SoruAimbotEnabled = false; PortalSoruEnabled = false
+    FakeKorbloxEnabled = false; FakeHeadlessEnabled = false; FPSPingOverlayEnabled = false
+    AntiStunHitboxEnabled = false
+
+    PlayerWidgetActive = false; NpcWidgetActive = false
+    SuperJumpWidgetVisible = false
+    PortalSoruWidgetVisible = false
+
+    for _, fn in ipairs(UI_Toggle_Refreshes) do 
+        pcall(function() fn(false) end) 
+    end
+    
+    DisableESP()
+    updateWidgetsVisuals()
+
+    resetBtn.Text = "✅ Reseteado / Reset Done!"
+    task.delay(1.5, function() resetBtn.Text = "🔄 Reset Config" end)
+end)
+
+-- Language button (optional, but keep for user convenience)
+local langCard = createModuleCard("Language", 60, MiscPage)
+langBtn = Instance.new("TextButton", langCard)
+langBtn.Size = UDim2.new(1, -20, 0, 28)
+langBtn.Position = UDim2.new(0, 10, 0, 24)
+langBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+langBtn.BackgroundTransparency = 0
+langBtn.Text = (currentLang == "ES" and "🌐 Idioma: Español (ES)" or "🌐 Language: English (EN)")
+langBtn.Font = Enum.Font.GothamBold
+langBtn.TextSize = 9.5
+langBtn.TextColor3 = COLORS.TextWhite
+Instance.new("UICorner", langBtn).CornerRadius = UDim.new(0, 6)
+local langBtnStroke = Instance.new("UIStroke", langBtn)
+langBtnStroke.Color = currentThemeColor
+langBtnStroke.Thickness = 1.2
+table.insert(themeStrokes, langBtnStroke)
+
+langBtn.MouseButton1Click:Connect(function()
+    local targetLang = (currentLang == "ES" and "EN" or "ES")
+    updateUILanguage(targetLang)
+    langBtn.Text = (currentLang == "ES" and "🌐 Idioma: Español (ES)" or "🌐 Language: English (EN)")
+end)
+
+end
+
+-- ============================================================
+-- THEME SYSTEM & KEYBINDING
+-- ============================================================
+do
+function isColorLight(c3)
+    return (c3.R * 0.299 + c3.G * 0.587 + c3.B * 0.114) > 0.65
+end
+
+local rainbowConnection = nil
+
+function applyNewTheme(themeName)
+    currentThemeName = themeName
+    if rainbowConnection then
+        rainbowConnection:Disconnect()
+        rainbowConnection = nil
+    end
+
+    currentThemeColor = THEMES[themeName] or THEMES["Gold Yellow"]
+
+    local function updateThemeColors(c3)
+        currentThemeColor = c3
+
+        for _, s in ipairs(themeStrokes) do 
+            if s and s.Parent then s.Color = c3 end 
+        end
+
+        for _, f in ipairs(themeFrames) do 
+            if f and f.Parent then 
+                f.BackgroundColor3 = c3 
+            end 
+        end
+
+        for _, t in ipairs(themeTexts) do 
+            if t and t.Parent then
+                t.TextColor3 = COLORS.TextWhite
+                t.TextStrokeTransparency = 0
+                t.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            end 
+        end
+
+        if rainContainer then
+            for _, drop in ipairs(rainContainer:GetChildren()) do
+                if drop and drop:IsA("Frame") and drop.Name == "RainDrop" then
+                    pcall(function() drop.BackgroundColor3 = c3 end)
+                end
+            end
+        end
+    end
+
+    if string.find(string.lower(themeName), "rainbow") then
+        local hue = 0
+        rainbowConnection = RunService.Heartbeat:Connect(function(dt)
+            hue = (hue + dt * 0.35) % 1
+            local rgb = Color3.fromHSV(hue, 0.9, 1)
+            updateThemeColors(rgb)
+        end)
+    else
+        updateThemeColors(currentThemeColor)
+    end
+
+    updateWidgetsVisuals()
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.F4 then
+        if mainFrame.Visible then
+            mainFrame.Visible = false
+            openButton.Visible = true
+        else
+            openButton.Visible = false
+            centerAndMaximizeUI()
+        end
+    end
+end)
+
+updateWidgetsVisuals()
+pcall(LoadConfig)
+pcall(LoadMacroConfig)
+centerAndMaximizeUI()
+end
+
+print("✅ RITUAL HUB v12.5 LOADED - ALL TOGGLES AND CONFIGS PERSISTENT")
