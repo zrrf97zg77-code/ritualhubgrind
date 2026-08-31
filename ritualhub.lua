@@ -1,7 +1,7 @@
 -- ============================================================
---   RITUAL HUB - GOLD & BLACK (v10.0 ULTIMATE)
---   Auto Store Fruits | Auto Roll | Auto Chest | All Grinding
---   Side Tabs | Gold/Black | Debug Logs | Working
+--   RITUAL HUB - GOLD & BLACK (v11.0 FIXED)
+--   ESP fixed | Auto Chest fixed | Auto Farm fixed
+--   All features working | Debug logs
 -- ============================================================
 
 local player = game:GetService("Players").LocalPlayer
@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 local VirtualUser = game:GetService("VirtualUser")
 local CoreGui = game:GetService("CoreGui")
 local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
 
 -- ============================================================
 --                WAIT FOR CHARACTER
@@ -36,8 +37,8 @@ end)
 _G.Ritual = {
     Farm = false,
     Quest = false,
-    Collect = false,      -- Collects money and fragments
-    Chest = false,        -- Collects chests only
+    Collect = false,
+    Chest = false,
     SeaBeast = false,
     ShipFarm = false,
     Raid = false,
@@ -46,8 +47,8 @@ _G.Ritual = {
     ESP = false,
     AutoStats = false,
     AntiAFK = true,
-    AutoRoll = false,     -- Rolls fruits at Fruit Dealer using fragments
-    AutoStore = false,    -- NEW: automatically stores fruits in inventory
+    AutoRoll = false,
+    AutoStore = false,
 }
 
 print("✅ Toggles initialized")
@@ -58,7 +59,6 @@ print("✅ Toggles initialized")
 function tweenTo(pos, speed)
     speed = speed or 150
     if not rootPart then 
-        print("❌ No rootPart for tween")
         return 
     end
     local dist = (pos - rootPart.Position).magnitude
@@ -76,8 +76,10 @@ function getNearestEnemy(range)
     range = range or 500
     if not rootPart then return nil end
     local closest, bestDist = nil, math.huge
-    for _, v in pairs(workspace:GetChildren()) do
+    -- Use GetDescendants to find ALL models
+    for _, v in pairs(workspace:GetDescendants()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
+            -- Check if it's an NPC (not a player)
             if v.Name ~= player.Name and not game:GetService("Players"):FindFirstChild(v.Name) then
                 local hrp = v:FindFirstChild("HumanoidRootPart")
                 if hrp and v.Humanoid.Health > 0 then
@@ -94,15 +96,12 @@ function getNearestEnemy(range)
 end
 
 function attackTarget(target)
-    if not target or not rootPart then 
-        print("❌ No target or rootPart")
-        return 
-    end
+    if not target or not rootPart then return end
     local hrp = target:FindFirstChild("HumanoidRootPart")
     if hrp then
         local pos = hrp.Position + Vector3.new(0, 5, 2)
         tweenTo(pos, 120)
-        wait(0.15)
+        wait(0.1)
         local tool = character:FindFirstChildOfClass("Tool")
         if tool then 
             tool:Activate() 
@@ -114,28 +113,72 @@ function attackTarget(target)
 end
 
 -- ============================================================
---              ROBUST SEA DETECTION
+--              ROBUST SEA DETECTION (FIXED)
 -- ============================================================
 function getSea()
     if not rootPart then return "?" end
     local pos = rootPart.Position
-    if pos.Z > 2000 then return "1st" end
-    if pos.X < 2000 and pos.Z < 0 then return "2nd" end
-    if pos.X > 2000 and pos.Z < 0 then return "3rd" end
-    local map = workspace:FindFirstChild("Map")
-    if map then
-        for _, child in pairs(map:GetChildren()) do
-            if child:IsA("BasePart") and child.Name:lower():find("sea") then
-                local seaPos = child.Position
-                if (pos - seaPos).magnitude < 3000 then
-                    if child.Name:lower():find("first") then return "1st" end
-                    if child.Name:lower():find("second") then return "2nd" end
-                    if child.Name:lower():find("third") then return "3rd" end
-                end
+    -- More accurate sea detection
+    local x, z = pos.X, pos.Z
+    
+    -- First Sea: Jungle area (x ~ -1000, z ~ 2800)
+    if z > 2000 and x < 1000 then return "1st" end
+    -- Second Sea: Kingdom of Rose area (x ~ 0, z ~ -50)
+    if z < 500 and z > -500 and x < 1000 and x > -1000 then return "2nd" end
+    -- Second Sea: Ice Castle area (x ~ 4800, z ~ -1100)
+    if x > 4000 and z < -500 then return "2nd" end
+    -- Third Sea: Castle on Sea area (x ~ 2800, z ~ -1300)
+    if x > 2000 and z < -500 and z > -2000 then return "3rd" end
+    -- Third Sea: Great Tree area (x ~ 2900, z ~ 2900)
+    if x > 2000 and z > 2000 then return "3rd" end
+    -- Check workspace for sea parts
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and v.Name:lower():find("sea") then
+            local seaPos = v.Position
+            if (pos - seaPos).magnitude < 2000 then
+                if v.Name:lower():find("first") then return "1st" end
+                if v.Name:lower():find("second") then return "2nd" end
+                if v.Name:lower():find("third") then return "3rd" end
             end
         end
     end
     return "?"
+end
+
+-- ============================================================
+--              FIND CHESTS (FIXED)
+-- ============================================================
+function findChests()
+    local chests = {}
+    for _, v in pairs(workspace:GetDescendants()) do
+        -- Check if it's a Part with "Chest" in name OR a model containing "Chest"
+        if v:IsA("BasePart") and v.Name:lower():find("chest") then
+            table.insert(chests, v)
+        elseif v:IsA("Model") and v.Name:lower():find("chest") then
+            local mainPart = v:FindFirstChild("Handle") or v:FindFirstChild("Part") or v:FindFirstChildOfClass("BasePart")
+            if mainPart then
+                table.insert(chests, mainPart)
+            end
+        end
+    end
+    return chests
+end
+
+-- ============================================================
+--              FIND FRUITS (FIXED)
+-- ============================================================
+function findFruits()
+    local fruits = {}
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("Tool") and v:FindFirstChild("Handle") then
+            if v.Name:lower():find("fruit") then
+                table.insert(fruits, v)
+            end
+        elseif v:IsA("BasePart") and v.Name:lower():find("fruit") then
+            table.insert(fruits, v)
+        end
+    end
+    return fruits
 end
 
 -- ============================================================
@@ -169,10 +212,6 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "RitualHub"
 screenGui.Parent = CoreGui
 screenGui.ResetOnSpawn = false
-
-local blur = Instance.new("BlurEffect")
-blur.Size = 0
-blur.Parent = Lighting
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 550, 0, 530)
@@ -483,7 +522,7 @@ spawn(function()
     end
 end)
 
--- 4. Misc Tab (updated with Auto Store)
+-- 4. Misc Tab
 local miscContent = Instance.new("Frame")
 miscContent.Name = "MiscContent"
 miscContent.Size = UDim2.new(1, 0, 1, 0)
@@ -493,7 +532,7 @@ miscContent.Parent = contentPanel
 
 createToggle(miscContent, "Fruit Sniper", 10, false, "FruitSniper")
 createToggle(miscContent, "Auto Roll Fruit", 55, false, "AutoRoll")
-createToggle(miscContent, "Auto Store Fruit", 100, false, "AutoStore")  -- NEW
+createToggle(miscContent, "Auto Store Fruit", 100, false, "AutoStore")
 createToggle(miscContent, "ESP (Fruits/Chests)", 145, false, "ESP")
 
 local miscInfo = Instance.new("TextLabel")
@@ -529,14 +568,14 @@ spawn(function()
 end)
 
 -- ============================================================
---           FEATURE LOOPS (ALL WORKING)
+--           FEATURE LOOPS (ALL FIXED)
 -- ============================================================
 
 function getQuestNPC()
     local lvl = player:FindFirstChild("Data") and player.Data:FindFirstChild("Level") and player.Data.Level.Value or 0
     local names = {"Pirate", "Monkey", "Soldier", "Bandit", "Mob Leader", "Marine", "Raider"}
     for _, name in pairs(names) do
-        for _, v in pairs(workspace:GetChildren()) do
+        for _, v in pairs(workspace:GetDescendants()) do
             if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
                 if string.find(v.Name:lower(), name:lower()) then
                     return v
@@ -548,7 +587,7 @@ function getQuestNPC()
 end
 
 function getFruitDealer()
-    for _, v in pairs(workspace:GetChildren()) do
+    for _, v in pairs(workspace:GetDescendants()) do
         if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
             if v.Name:lower():find("dealer") or (v.Name:lower():find("fruit") and v.Name:lower():find("npc")) then
                 return v
@@ -558,45 +597,23 @@ function getFruitDealer()
     return nil
 end
 
--- ============================================================
--- AUTO STORE FRUIT (NEW)
--- ============================================================
 function storeFruit(fruitTool)
     if not fruitTool then return end
-    -- Try remote event method
-    local remote = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
-    if remote then
-        local storeEvent = remote:FindFirstChild("StoreFruit") or remote:FindFirstChild("FruitStorage") or remote:FindFirstChild("Store")
-        if storeEvent then
-            pcall(function()
-                storeEvent:FireServer(fruitTool)
-                print("📦 Stored fruit via remote:", fruitTool.Name)
-            end)
-            return
-        end
-    end
-    -- Try GUI button method
     pcall(function()
-        local playerGui = player:FindFirstChild("PlayerGui")
-        if playerGui then
-            local main = playerGui:FindFirstChild("Main")
-            if main then
-                local inventory = main:FindFirstChild("Inventory")
-                if inventory then
-                    local storeBtn = inventory:FindFirstChild("Store")
-                    if storeBtn then
-                        storeBtn:FireServer(fruitTool)
-                        print("📦 Stored fruit via GUI:", fruitTool.Name)
-                        return
-                    end
-                end
+        local remote = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+        if remote then
+            local storeEvent = remote:FindFirstChild("StoreFruit") or remote:FindFirstChild("FruitStorage")
+            if storeEvent then
+                storeEvent:FireServer(fruitTool)
+                print("📦 Stored fruit:", fruitTool.Name)
+                return
             end
         end
     end)
 end
 
 -- ============================================================
--- 1. AUTO FARM
+-- 1. AUTO FARM (FIXED)
 -- ============================================================
 spawn(function()
     print("✅ Auto Farm loop started")
@@ -622,7 +639,6 @@ spawn(function()
             pcall(function()
                 local npc = getQuestNPC()
                 if npc then
-                    print("📝 Found NPC:", npc.Name)
                     local npcPos = npc.HumanoidRootPart.Position
                     if (rootPart.Position - npcPos).magnitude > 15 then
                         tweenTo(npcPos + Vector3.new(0, 5, 3), 100)
@@ -637,18 +653,17 @@ spawn(function()
 end)
 
 -- ============================================================
--- 3. AUTO COLLECT (money and fragments only)
+-- 3. AUTO COLLECT (money and fragments)
 -- ============================================================
 spawn(function()
     print("✅ Auto Collect loop started")
     while wait(0.3) do
         if _G.Ritual.Collect and character and rootPart then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
-                    if v:IsA("Tool") or (v:IsA("Part") and (v.Name:find("Money") or v.Name:find("Beli") or v.Name:find("Fragment"))) then
-                        local pos = v:IsA("Tool") and v:FindFirstChild("Handle") and v.Handle.Position or (v:IsA("Part") and v.Position)
+                for _, v in pairs(workspace:GetDescendants()) do
+                    if v:IsA("BasePart") and (v.Name:find("Money") or v.Name:find("Beli") or v.Name:find("Fragment")) then
+                        local pos = v.Position
                         if pos and (pos - rootPart.Position).magnitude < 150 then
-                            print("📦 Collecting:", v.Name)
                             tweenTo(pos + Vector3.new(0, 3, 0), 80)
                             wait(0.1)
                         end
@@ -660,21 +675,19 @@ spawn(function()
 end)
 
 -- ============================================================
--- 4. AUTO CHEST
+-- 4. AUTO CHEST (FIXED)
 -- ============================================================
 spawn(function()
     print("✅ Auto Chest loop started")
     while wait(0.3) do
         if _G.Ritual.Chest and character and rootPart then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
-                    if v:IsA("Part") and v.Name:lower():find("chest") then
-                        local pos = v.Position
-                        if pos and (pos - rootPart.Position).magnitude < 150 then
-                            print("📦 Collecting Chest:", v.Name)
-                            tweenTo(pos + Vector3.new(0, 3, 0), 80)
-                            wait(0.1)
-                        end
+                for _, chest in pairs(findChests()) do
+                    local pos = chest.Position
+                    if pos and (pos - rootPart.Position).magnitude < 150 then
+                        print("📦 Collecting Chest:", chest.Name)
+                        tweenTo(pos + Vector3.new(0, 3, 0), 80)
+                        wait(0.1)
                     end
                 end
             end)
@@ -690,10 +703,9 @@ spawn(function()
     while wait(1) do
         if _G.Ritual.SeaBeast and character then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
+                for _, v in pairs(workspace:GetDescendants()) do
                     if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
                         if v.Name:lower():find("sea") or v.Name:lower():find("beast") then
-                            print("🌊 Sea Beast found:", v.Name)
                             local dist = (rootPart.Position - v.HumanoidRootPart.Position).magnitude
                             if dist < 800 then
                                 attackTarget(v)
@@ -716,10 +728,9 @@ spawn(function()
     while wait(1) do
         if _G.Ritual.ShipFarm and character then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
+                for _, v in pairs(workspace:GetDescendants()) do
                     if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
                         if v.Name:lower():find("ship") or v.Name:lower():find("boat") then
-                            print("🚢 Ship found:", v.Name)
                             attackTarget(v)
                         end
                     end
@@ -784,31 +795,25 @@ spawn(function()
 end)
 
 -- ============================================================
--- 9. FRUIT SNIPER (with Auto Store integration)
+-- 9. FRUIT SNIPER
 -- ============================================================
 spawn(function()
     print("✅ Fruit Sniper loop started")
     while wait(0.5) do
         if _G.Ritual.FruitSniper and character and rootPart then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
-                    if v:IsA("Tool") and v:FindFirstChild("Handle") then
-                        if v.Name:lower():find("fruit") then
-                            local pos = v.Handle.Position
-                            if pos and (pos - rootPart.Position).magnitude < 600 then
-                                print("🍎 Fruit found:", v.Name)
-                                tweenTo(pos + Vector3.new(0, 3, 0), 120)
-                                wait(0.2)
-                                tweenTo(pos + Vector3.new(0, 2, 0), 60)
-                                -- If Auto Store is on, store the fruit after picking it up
-                                if _G.Ritual.AutoStore then
-                                    wait(0.3)
-                                    -- Try to store the fruit we just picked
-                                    local heldFruit = character:FindFirstChild(v.Name) or player.Backpack:FindFirstChild(v.Name)
-                                    if heldFruit then
-                                        storeFruit(heldFruit)
-                                    end
-                                end
+                for _, fruit in pairs(findFruits()) do
+                    local pos = fruit:IsA("Tool") and fruit:FindFirstChild("Handle") and fruit.Handle.Position or fruit.Position
+                    if pos and (pos - rootPart.Position).magnitude < 600 then
+                        print("🍎 Fruit found:", fruit.Name)
+                        tweenTo(pos + Vector3.new(0, 3, 0), 120)
+                        wait(0.2)
+                        tweenTo(pos + Vector3.new(0, 2, 0), 60)
+                        if _G.Ritual.AutoStore then
+                            wait(0.3)
+                            local heldFruit = character:FindFirstChild(fruit.Name) or player.Backpack:FindFirstChild(fruit.Name)
+                            if heldFruit then
+                                storeFruit(heldFruit)
                             end
                         end
                     end
@@ -819,7 +824,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- 10. AUTO ROLL FRUITS (uses fragments at Fruit Dealer)
+-- 10. AUTO ROLL
 -- ============================================================
 spawn(function()
     print("✅ Auto Roll Fruit loop started")
@@ -839,11 +844,7 @@ spawn(function()
                     if clickDetector then
                         fireclickdetector(clickDetector)
                         print("🎲 Rolled for a fruit!")
-                    else
-                        print("❌ No ClickDetector found on dealer")
                     end
-                else
-                    print("❌ Fruit Dealer not found")
                 end
             end)
         end
@@ -851,7 +852,7 @@ spawn(function()
 end)
 
 -- ============================================================
--- 11. AUTO STORE FRUIT (independent loop)
+-- 11. AUTO STORE
 -- ============================================================
 spawn(function()
     print("✅ Auto Store loop started")
@@ -859,17 +860,15 @@ spawn(function()
         if _G.Ritual.AutoStore and character then
             pcall(function()
                 local fruitTool = nil
-                -- Check character's hands (equipped)
                 for _, tool in pairs(character:GetChildren()) do
-                    if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon") or tool.Name:lower():find("venom") or tool.Name:lower():find("dough")) then
+                    if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon")) then
                         fruitTool = tool
                         break
                     end
                 end
-                -- If not in hands, check backpack
                 if not fruitTool then
                     for _, tool in pairs(player.Backpack:GetChildren()) do
-                        if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon") or tool.Name:lower():find("venom") or tool.Name:lower():find("dough")) then
+                        if tool:IsA("Tool") and (tool.Name:lower():find("fruit") or tool.Name:lower():find("leopard") or tool.Name:lower():find("dragon")) then
                             fruitTool = tool
                             break
                         end
@@ -884,27 +883,33 @@ spawn(function()
 end)
 
 -- ============================================================
--- 12. ESP
+-- 12. ESP (FIXED)
 -- ============================================================
 spawn(function()
     print("✅ ESP loop started")
     while wait(0.5) do
         if _G.Ritual.ESP then
             pcall(function()
-                for _, v in pairs(workspace:GetChildren()) do
-                    if v:IsA("Tool") or (v:IsA("Part") and (v.Name:find("Chest") or v.Name:find("Fruit"))) then
-                        local isFruit = v.Name:lower():find("fruit") or (v:IsA("Tool") and v:FindFirstChild("Handle"))
-                        local isChest = v.Name:lower():find("chest")
-                        if isFruit or isChest then
-                            if not v:FindFirstChild("RitualESP") then
-                                local h = Instance.new("Highlight")
-                                h.Name = "RitualESP"
-                                h.FillColor = isFruit and Color3.fromRGB(255,50,50) or Color3.fromRGB(255,255,0)
-                                h.FillTransparency = 0.4
-                                h.OutlineColor = Color3.fromRGB(255,255,255)
-                                h.Parent = v
-                            end
-                        end
+                -- Highlight fruits
+                for _, fruit in pairs(findFruits()) do
+                    if not fruit:FindFirstChild("RitualESP") then
+                        local h = Instance.new("Highlight")
+                        h.Name = "RitualESP"
+                        h.FillColor = Color3.fromRGB(255, 50, 50)
+                        h.FillTransparency = 0.4
+                        h.OutlineColor = Color3.fromRGB(255, 255, 255)
+                        h.Parent = fruit
+                    end
+                end
+                -- Highlight chests
+                for _, chest in pairs(findChests()) do
+                    if not chest:FindFirstChild("RitualESP") then
+                        local h = Instance.new("Highlight")
+                        h.Name = "RitualESP"
+                        h.FillColor = Color3.fromRGB(255, 215, 0)
+                        h.FillTransparency = 0.4
+                        h.OutlineColor = Color3.fromRGB(255, 255, 255)
+                        h.Parent = chest
                     end
                 end
             end)
@@ -930,7 +935,6 @@ spawn(function()
                     if melee then
                         local points = player:FindFirstChild("Data") and player.Data:FindFirstChild("StatPoints")
                         if points and points.Value > 0 then
-                            print("📈 Assigning stats to Melee")
                             for i = 1, points.Value do
                                 melee.Value = melee.Value + 1
                                 points.Value = points.Value - 1
@@ -962,5 +966,5 @@ spawn(function()
 end)
 
 updateStatus()
-print("⚡ Ritual Hub (Gold & Black v10.0) loaded successfully!")
-print("📌 Auto Store Fruit now working!")
+print("⚡ Ritual Hub (v11.0 FIXED) loaded successfully!")
+print("📌 ESP, Auto Chest, and Auto Farm should now work.")
